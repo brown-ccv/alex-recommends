@@ -2,6 +2,12 @@
 
 Uses [alex](https://alexjs.com/) to check language and post a comment on the pull request with the recommendations.
 
+### Alex recommends changes
+![Alex Recommends Changes](assets/alex-recommends-changes.png "Alex Recommends Changes")
+
+### Alex has no changes to recommend
+![Alex Doesn't Recommends Changes](assets/alex-recommends-nothing.png "Alex Recommends Nothing")
+
 ## Inputs
 
 ### `GITHUB_TOKEN`
