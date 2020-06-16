@@ -1,5 +1,5 @@
 
-name: "Comment on PR from File"
+name: "Alex Recommends"
 description: "Create comment on pull request with alex recommendations."
 author: "mcmcgrath13"
 inputs:
