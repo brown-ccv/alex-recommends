@@ -1,0 +1,30 @@
+
+name: "Comment on PR from File"
+description: "Create comment on pull request with alex recommendations."
+author: "mcmcgrath13"
+inputs:
+  GITHUB_TOKEN:
+    description: "set secrets.GITHUB_TOKEN here"
+  message_id:
+    description: "string to identify this message, once a message with this id is added - won't be added again"
+    default: 'Alex Recommends'
+  no_binary:
+    description: "Alex noBinary configuration option - if false items like `he or she` will not be corrected to `they`"
+    default: true
+  profanity_sureness:
+    description: "Alex profanitySureness configuration option - 0=unlikely, 1=maybe, 2=likely"
+    default: 1
+  glob_pattern:
+    description: "Glob pattern used for filtering files"
+    default: "*"
+  pr_only:
+    description: "Whether to only run alex on files changed in this PR"
+    default: true
+
+runs:
+  using: "node12"
+  main: "dist/index.js"
+
+branding:
+  color: purple
+  icon: pen-tool

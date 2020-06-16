@@ -1,0 +1,22 @@
+{
+  "name": "alex-recommends",
+  "version": "1.0.0",
+  "description": "Comment on a PR with alex recommendations",
+  "main": "main.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "package": "ncc build $npm_package_main -o dist"
+  },
+  "author": "mcmcgrath13",
+  "license": "MIT",
+  "dependencies": {
+    "@actions/core": "^1.2",
+    "@actions/github": "^3.0.0",
+    "@actions/glob": "^0.1.0",
+    "alex": "^8.1.1",
+    "fs-extra": "^8.1.0"
+  },
+  "devDependencies": {
+    "@zeit/ncc": "^0.20.5"
+  }
+}
