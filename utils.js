@@ -35,11 +35,14 @@ function getExt(file) {
 	return path.extname(file).slice(1)
 }
 
+function extensionType(extension) {
+  EXTENSIONS_TO_CHECK[extension] || 'text';
+}
 
 function checkFile(file, options) {
 	console.warn(`checking ${file}`)
 	const extension = getExt(file)
-	const checkType = EXTENSIONS_TO_CHECK[extension]
+	const checkType = extensionType(extension)
 
 	const body = fs.readFileSync(file, "utf-8");
 
