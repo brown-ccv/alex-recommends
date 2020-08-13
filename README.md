@@ -44,7 +44,7 @@ This workflow runs when a PR is made.  It then comments with the results of `ale
 ```
 name: Alex Recommends
 
-on: pull_request
+on: pull_request_target
 
 jobs:
   alex:
