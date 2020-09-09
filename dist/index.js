@@ -807,7 +807,95 @@ module.exports = keysShim;
 
 
 /***/ }),
-/* 24 */,
+/* 24 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = convert
+
+function convert(test) {
+  if (typeof test === 'string') {
+    return tagNameFactory(test)
+  }
+
+  if (test === null || test === undefined) {
+    return element
+  }
+
+  if (typeof test === 'object') {
+    return any(test)
+  }
+
+  if (typeof test === 'function') {
+    return callFactory(test)
+  }
+
+  throw new Error('Expected function, string, or array as test')
+}
+
+function convertAll(tests) {
+  var length = tests.length
+  var index = -1
+  var results = []
+
+  while (++index < length) {
+    results[index] = convert(tests[index])
+  }
+
+  return results
+}
+
+function any(tests) {
+  var checks = convertAll(tests)
+  var length = checks.length
+
+  return matches
+
+  function matches() {
+    var index = -1
+
+    while (++index < length) {
+      if (checks[index].apply(this, arguments)) {
+        return true
+      }
+    }
+
+    return false
+  }
+}
+
+// Utility to convert a string a tag name check.
+function tagNameFactory(test) {
+  return tagName
+
+  function tagName(node) {
+    return element(node) && node.tagName === test
+  }
+}
+
+// Utility to convert a function check.
+function callFactory(test) {
+  return call
+
+  function call(node) {
+    return element(node) && Boolean(test.apply(this, arguments))
+  }
+}
+
+// Utility to return true if this is an element.
+function element(node) {
+  return (
+    node &&
+    typeof node === 'object' &&
+    node.type === 'element' &&
+    typeof node.tagName === 'string'
+  )
+}
+
+
+/***/ }),
 /* 25 */,
 /* 26 */,
 /* 27 */
@@ -1161,35 +1249,117 @@ exports.isUndefinedCodePoint = function(cp) {
 "use strict";
 
 
-var toString = __webpack_require__(419)
-var modifyChildren = __webpack_require__(918)
-var expressions = __webpack_require__(356)
+var stringifyEntities = __webpack_require__(279)
+var mdxExpression = __webpack_require__(755)
+var indent = __webpack_require__(973)
 
-module.exports = modifyChildren(mergeInitialDigitSentences)
+module.exports = mdxElement
 
-// Initial lowercase letter.
-var digit = expressions.digitStart
+// Expose helper to create tags.
+mdxElement.serializeTags = serializeTags
 
-// Merge a sentence into its previous sentence, when the sentence starts with a
-// lower case letter.
-function mergeInitialDigitSentences(child, index, parent) {
-  var children = child.children
-  var siblings = parent.children
-  var prev = siblings[index - 1]
-  var head = children[0]
+var lineFeed = '\n'
+var space = ' '
+var slash = '/'
+var quotationMark = '"'
+var lessThan = '<'
+var equalsTo = '='
+var greaterThan = '>'
 
-  if (prev && head && head.type === 'WordNode' && digit.test(toString(head))) {
-    prev.children = prev.children.concat(children)
-    siblings.splice(index, 1)
+var valueCharacterReferenceOptions = {
+  useNamedReferences: true,
+  subset: [quotationMark]
+}
 
-    // Update position.
-    if (prev.position && child.position) {
-      prev.position.end = child.position.end
-    }
+function mdxElement(node) {
+  var tags = serializeTags(node)
+  var block = node.type === 'mdxBlockElement'
+  var content = this.all(node).join(block ? lineFeed + lineFeed : '')
 
-    // Next, iterate over the node *now* at the current position.
-    return index
+  if (block && content) {
+    content = lineFeed + indent(content) + lineFeed
   }
+
+  return tags.open + content + (tags.close || '')
+}
+
+function serializeTags(node) {
+  var block = node.type === 'mdxBlockElement'
+  var name = String(node.name || '')
+  var attributes = serializeAttributes(node.attributes || [], block)
+  var selfClosing = name && node.children.length === 0
+
+  if (name === '' && attributes !== '') {
+    throw new Error('Cannot serialize fragment with attributes')
+  }
+
+  return {
+    open: lessThan +
+      name +
+      attributes +
+      (selfClosing ? slash : '') +
+      greaterThan,
+    close: selfClosing ? null : lessThan + slash + name + greaterThan
+  }
+}
+
+function serializeAttributes(nodes, block) {
+  var length = nodes.length
+  var index = -1
+  var result = []
+
+  while (++index < length) {
+    result.push(serializeAttribute(nodes[index]))
+  }
+
+  // None.
+  if (result.length === 0) {
+    return ''
+  }
+
+  // A block with multiple attributes
+  if (block && result.length !== 1) {
+    return lineFeed + indent(result.join(lineFeed)) + lineFeed
+  }
+
+  // A span, or a block with a single attribute.
+  return space + dedentStart(indent(result.join(space)))
+}
+
+function serializeAttribute(node) {
+  var fn = node.type === 'mdxAttributeExpression' ? mdxExpression : mdxAttribute
+  return fn(node)
+}
+
+function serializeValue(value) {
+  if (typeof value === 'object') {
+    return mdxExpression(value)
+  }
+
+  return (
+    quotationMark +
+    stringifyEntities(value, valueCharacterReferenceOptions) +
+    quotationMark
+  )
+}
+
+function mdxAttribute(node) {
+  var name = String(node.name || '')
+  var value = node.value
+
+  if (name === '') {
+    throw new Error('Cannot serialize attribute without name')
+  }
+
+  if (value === null || value === undefined) {
+    return name
+  }
+
+  return name + equalsTo + serializeValue(value)
+}
+
+function dedentStart(value) {
+  return value.replace(/ +/, '')
 }
 
 
@@ -2748,7 +2918,7 @@ function hrStartTagInBody(p, token) {
 
     p._appendElement(token, NS.HTML);
     p.framesetOk = false;
-    p.ackSelfClosing = true;
+    token.ackSelfClosing = true;
 }
 
 function imageStartTagInBody(p, token) {
@@ -4220,6 +4390,7 @@ var VFile = __webpack_require__(51)
 var unified = __webpack_require__(646)
 var markdown = __webpack_require__(195)
 var frontmatter = __webpack_require__(658)
+var mdx = __webpack_require__(242)
 var html = __webpack_require__(596)
 var english = __webpack_require__(233)
 var equality = __webpack_require__(163)
@@ -4232,21 +4403,34 @@ var filter = __webpack_require__(434)
 module.exports = alex
 alex.text = noMarkdown
 alex.markdown = alex
+alex.mdx = mdxParse
 alex.html = htmlParse
 
 function makeText(config) {
   return unified()
     .use(english)
-    .use(equality)
+    .use(equality, {
+      noBinary: config && config.noBinary
+    })
     .use(profanities, {
       sureness: config && config.profanitySureness
     })
 }
 
 // Alex’s core.
-function core(value, processor) {
+function core(value, config, processor) {
+  var allow
+  var deny
+
+  if (Array.isArray(config)) {
+    allow = config
+  } else if (config) {
+    allow = config.allow
+    deny = config.deny
+  }
+
   var file = new VFile(value)
-  var tree = processor.parse(file)
+  var tree = processor.use(filter, {allow: allow, deny: deny}).parse(file)
 
   processor.runSync(tree, file)
 
@@ -4257,54 +4441,37 @@ function core(value, processor) {
 
 // Alex.
 function alex(value, config) {
-  var allow
-
-  if (Array.isArray(config)) {
-    allow = config
-  } else if (config) {
-    allow = config.allow
-  }
-
   return core(
     value,
+    config,
     unified()
       .use(markdown)
       .use(frontmatter, ['yaml', 'toml'])
       .use(remark2retext, makeText(config))
-      .use(filter, {allow: allow})
+  )
+}
+
+// Alex, for MDX.
+function mdxParse(value, config) {
+  return core(
+    value,
+    config,
+    unified().use(markdown).use(mdx).use(remark2retext, makeText(config))
   )
 }
 
 // Alex, for HTML.
 function htmlParse(value, config) {
-  var allow
-
-  if (Array.isArray(config)) {
-    allow = config
-  } else if (config) {
-    allow = config.allow
-  }
-
   return core(
     value,
-    unified()
-      .use(html)
-      .use(rehype2retext, makeText(config))
-      .use(filter, {allow: allow})
+    config,
+    unified().use(html).use(rehype2retext, makeText(config))
   )
 }
 
 // Alex, without the markdown.
 function noMarkdown(value, config) {
-  var allow
-
-  if (Array.isArray(config)) {
-    allow = config
-  } else if (config) {
-    allow = config.allow
-  }
-
-  return core(value, makeText(config).use(filter, {allow: allow}))
+  return core(value, config, makeText(config))
 }
 
 
@@ -4362,17 +4529,19 @@ class LocationInfoParserMixin extends Mixin {
                 // NOTE: For cases like <p> <p> </p> - First 'p' closes without a closing
                 // tag and for cases like <td> <p> </td> - 'p' closes without a closing tag.
                 const isClosingEndTag = closingToken.type === Tokenizer.END_TAG_TOKEN && tn === closingToken.tagName;
-
+                const endLoc = {};
                 if (isClosingEndTag) {
-                    loc.endTag = Object.assign({}, ctLoc);
-                    loc.endLine = ctLoc.endLine;
-                    loc.endCol = ctLoc.endCol;
-                    loc.endOffset = ctLoc.endOffset;
+                    endLoc.endTag = Object.assign({}, ctLoc);
+                    endLoc.endLine = ctLoc.endLine;
+                    endLoc.endCol = ctLoc.endCol;
+                    endLoc.endOffset = ctLoc.endOffset;
                 } else {
-                    loc.endLine = ctLoc.startLine;
-                    loc.endCol = ctLoc.startCol;
-                    loc.endOffset = ctLoc.startOffset;
+                    endLoc.endLine = ctLoc.startLine;
+                    endLoc.endCol = ctLoc.startCol;
+                    endLoc.endOffset = ctLoc.startOffset;
                 }
+
+                this.treeAdapter.updateNodeSourceCodeLocation(element, endLoc);
             }
         }
     }
@@ -4527,9 +4696,8 @@ class LocationInfoParserMixin extends Mixin {
                 const tnLoc = this.treeAdapter.getNodeSourceCodeLocation(textNode);
 
                 if (tnLoc) {
-                    tnLoc.endLine = token.location.endLine;
-                    tnLoc.endCol = token.location.endCol;
-                    tnLoc.endOffset = token.location.endOffset;
+                    const { endLine, endCol, endOffset } = token.location;
+                    this.treeAdapter.updateNodeSourceCodeLocation(textNode, { endLine, endCol, endOffset });
                 } else {
                     this.treeAdapter.setNodeSourceCodeLocation(textNode, token.location);
                 }
@@ -4593,7 +4761,7 @@ function emphasis(eat, value, silent) {
   var queue
   var subvalue
   var length
-  var prev
+  var previous
 
   if (character !== asterisk && character !== underscore) {
     return
@@ -4612,14 +4780,14 @@ function emphasis(eat, value, silent) {
   }
 
   while (index < length) {
-    prev = character
+    previous = character
     character = value.charAt(index)
 
-    if (character === marker && (!pedantic || !whitespace(prev))) {
+    if (character === marker && (!pedantic || !whitespace(previous))) {
       character = value.charAt(++index)
 
       if (character !== marker) {
-        if (!trim(queue) || prev === marker) {
+        if (!trim(queue) || previous === marker) {
           return
         }
 
@@ -4771,20 +4939,6 @@ function link(eat, value, silent) {
       if (depth) {
         depth--
       } else {
-        // Allow white-space between content and url in GFM mode.
-        if (!pedantic) {
-          while (index < length) {
-            character = value.charAt(index + 1)
-
-            if (!whitespace(character)) {
-              break
-            }
-
-            subqueue += character
-            index++
-          }
-        }
-
         if (value.charAt(index + 1) !== leftParenthesis) {
           return
         }
@@ -5135,91 +5289,7 @@ module.exports = require("os");
 /* 89 */,
 /* 90 */,
 /* 91 */,
-/* 92 */
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-"use strict";
-
-
-module.exports = visitParents
-
-var convert = __webpack_require__(449)
-
-var CONTINUE = true
-var SKIP = 'skip'
-var EXIT = false
-
-visitParents.CONTINUE = CONTINUE
-visitParents.SKIP = SKIP
-visitParents.EXIT = EXIT
-
-function visitParents(tree, test, visitor, reverse) {
-  var is
-
-  if (typeof test === 'function' && typeof visitor !== 'function') {
-    reverse = visitor
-    visitor = test
-    test = null
-  }
-
-  is = convert(test)
-
-  one(tree, null, [])
-
-  // Visit a single node.
-  function one(node, index, parents) {
-    var result = []
-    var subresult
-
-    if (!test || is(node, index, parents[parents.length - 1] || null)) {
-      result = toResult(visitor(node, parents))
-
-      if (result[0] === EXIT) {
-        return result
-      }
-    }
-
-    if (node.children && result[0] !== SKIP) {
-      subresult = toResult(all(node.children, parents.concat(node)))
-      return subresult[0] === EXIT ? subresult : result
-    }
-
-    return result
-  }
-
-  // Visit children in `parent`.
-  function all(children, parents) {
-    var min = -1
-    var step = reverse ? -1 : 1
-    var index = (reverse ? children.length : min) + step
-    var result
-
-    while (index > min && index < children.length) {
-      result = one(children[index], index, parents)
-
-      if (result[0] === EXIT) {
-        return result
-      }
-
-      index = typeof result[1] === 'number' ? result[1] : index + step
-    }
-  }
-}
-
-function toResult(value) {
-  if (value !== null && typeof value === 'object' && 'length' in value) {
-    return value
-  }
-
-  if (typeof value === 'number') {
-    return [CONTINUE, value]
-  }
-
-  return [value]
-}
-
-
-/***/ }),
+/* 92 */,
 /* 93 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -6256,7 +6326,30 @@ module.exports = moveSync
 
 
 /***/ }),
-/* 96 */,
+/* 96 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = enclose
+
+var quotationMark = '"'
+var apostrophe = "'"
+
+// There is currently no way to support nested delimiters across Markdown.pl,
+// CommonMark, and GitHub (RedCarpet).  The following code supports Markdown.pl
+// and GitHub.
+// CommonMark is not supported when mixing double- and single quotes inside a
+// title.
+function enclose(title) {
+  var delimiter =
+    title.indexOf(quotationMark) === -1 ? quotationMark : apostrophe
+  return delimiter + title + delimiter
+}
+
+
+/***/ }),
 /* 97 */,
 /* 98 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -6799,7 +6892,30 @@ module.exports = copySync
 /* 112 */,
 /* 113 */,
 /* 114 */,
-/* 115 */,
+/* 115 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+const ErrorReportingMixinBase = __webpack_require__(394);
+const ErrorReportingPreprocessorMixin = __webpack_require__(478);
+const Mixin = __webpack_require__(785);
+
+class ErrorReportingTokenizerMixin extends ErrorReportingMixinBase {
+    constructor(tokenizer, opts) {
+        super(tokenizer, opts);
+
+        const preprocessorMixin = Mixin.install(tokenizer.preprocessor, ErrorReportingPreprocessorMixin, opts);
+
+        this.posTracker = preprocessorMixin.posTracker;
+    }
+}
+
+module.exports = ErrorReportingTokenizerMixin;
+
+
+/***/ }),
 /* 116 */,
 /* 117 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -7120,7 +7236,89 @@ module.exports.default = macosRelease;
 
 
 /***/ }),
-/* 119 */,
+/* 119 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = factory
+
+function factory(file) {
+  var contents = indices(String(file))
+  var toPoint = offsetToPointFactory(contents)
+
+  return {
+    toPoint: toPoint,
+    toPosition: toPoint,
+    toOffset: pointToOffsetFactory(contents)
+  }
+}
+
+// Factory to get the line and column-based `point` for `offset` in the bound
+// indices.
+function offsetToPointFactory(indices) {
+  return offsetToPoint
+
+  // Get the line and column-based `point` for `offset` in the bound indices.
+  function offsetToPoint(offset) {
+    var index = -1
+    var length = indices.length
+
+    if (offset < 0) {
+      return {}
+    }
+
+    while (++index < length) {
+      if (indices[index] > offset) {
+        return {
+          line: index + 1,
+          column: offset - (indices[index - 1] || 0) + 1,
+          offset: offset
+        }
+      }
+    }
+
+    return {}
+  }
+}
+
+// Factory to get the `offset` for a line and column-based `point` in the
+// bound indices.
+function pointToOffsetFactory(indices) {
+  return pointToOffset
+
+  // Get the `offset` for a line and column-based `point` in the bound
+  // indices.
+  function pointToOffset(point) {
+    var line = point && point.line
+    var column = point && point.column
+
+    if (!isNaN(line) && !isNaN(column) && line - 1 in indices) {
+      return (indices[line - 2] || 0) + column - 1 || 0
+    }
+
+    return -1
+  }
+}
+
+// Get indices of line-breaks in `value`.
+function indices(value) {
+  var result = []
+  var index = value.indexOf('\n')
+
+  while (index !== -1) {
+    result.push(index + 1)
+    index = value.indexOf('\n', index + 1)
+  }
+
+  result.push(value.length + 1)
+
+  return result
+}
+
+
+/***/ }),
 /* 120 */,
 /* 121 */,
 /* 122 */
@@ -7491,7 +7689,7 @@ module.exports = require("child_process");
 
 
 const ErrorReportingMixinBase = __webpack_require__(394);
-const ErrorReportingTokenizerMixin = __webpack_require__(460);
+const ErrorReportingTokenizerMixin = __webpack_require__(115);
 const LocationInfoTokenizerMixin = __webpack_require__(863);
 const Mixin = __webpack_require__(785);
 
@@ -7770,11 +7968,11 @@ proto.use('tokenizeParagraph', [
   __webpack_require__(675),
   __webpack_require__(98),
   __webpack_require__(514),
-  __webpack_require__(57),
+  __webpack_require__(355),
   __webpack_require__(638),
   __webpack_require__(984),
   __webpack_require__(909),
-  __webpack_require__(580),
+  __webpack_require__(251),
   __webpack_require__(590),
   __webpack_require__(467),
   __webpack_require__(649),
@@ -7782,7 +7980,7 @@ proto.use('tokenizeParagraph', [
 ])
 
 proto.use('tokenizeRoot', [
-  __webpack_require__(580),
+  __webpack_require__(251),
   __webpack_require__(590),
   __webpack_require__(649),
   __webpack_require__(1)
@@ -8427,25 +8625,19 @@ exports.debug = debug; // for test
 /* 142 */,
 /* 143 */,
 /* 144 */
-/***/ (function(module, __unusedexports, __webpack_require__) {
+/***/ (function(module) {
 
 "use strict";
 
 
-var create = __webpack_require__(42)
+module.exports = serializeFormattedCode
 
-module.exports = create({
-  space: 'xml',
-  transform: xmlTransform,
-  properties: {
-    xmlLang: null,
-    xmlBase: null,
-    xmlSpace: null
-  }
-})
+var fromCharCode = String.fromCharCode
 
-function xmlTransform(_, prop) {
-  return 'xml:' + prop.slice(3).toLowerCase()
+var graveAccent = 96 // '`'
+
+function serializeFormattedCode(code) {
+  return '`' + (code === graveAccent ? '` ` `' : fromCharCode(code)) + '`'
 }
 
 
@@ -9255,7 +9447,6 @@ module.exports = FormattingElementList;
 
 
 var trim = __webpack_require__(860)
-var decimal = __webpack_require__(926)
 var trimTrailingLines = __webpack_require__(932)
 var interrupt = __webpack_require__(853)
 
@@ -9272,7 +9463,6 @@ function paragraph(eat, value, silent) {
   var self = this
   var settings = self.options
   var commonmark = settings.commonmark
-  var gfm = settings.gfm
   var tokenizers = self.blockTokenizers
   var interruptors = self.interruptParagraph
   var index = value.indexOf(lineFeed)
@@ -9328,17 +9518,6 @@ function paragraph(eat, value, silent) {
       break
     }
 
-    // Break if the following line starts a list, when already in a list, or
-    // when in commonmark, or when in gfm mode and the bullet is *not* numeric.
-    if (
-      tokenizers.list.call(self, eat, subvalue, true) &&
-      (self.inList ||
-        commonmark ||
-        (gfm && !decimal(trim.left(subvalue).charAt(0))))
-    ) {
-      break
-    }
-
     position = index
     index = value.indexOf(lineFeed, index + 1)
 
@@ -9349,12 +9528,6 @@ function paragraph(eat, value, silent) {
   }
 
   subvalue = value.slice(0, index)
-
-  if (trim(subvalue) === '') {
-    eat(subvalue)
-
-    return null
-  }
 
   /* istanbul ignore if - never used (yet) */
   if (silent) {
@@ -9856,7 +10029,46 @@ function mergeInnerWordSlash(child, index, parent) {
 /* 185 */,
 /* 186 */,
 /* 187 */,
-/* 188 */,
+/* 188 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var count = __webpack_require__(126)
+
+module.exports = enclose
+
+var leftParenthesis = '('
+var rightParenthesis = ')'
+var lessThan = '<'
+var greaterThan = '>'
+
+var expression = /\s/
+
+// Wrap `url` in angle brackets when needed, or when
+// forced.
+// In links, images, and definitions, the URL part needs
+// to be enclosed when it:
+//
+// - has a length of `0`
+// - contains white-space
+// - has more or less opening than closing parentheses
+function enclose(uri, always) {
+  if (
+    always ||
+    uri.length === 0 ||
+    expression.test(uri) ||
+    count(uri, leftParenthesis) !== count(uri, rightParenthesis)
+  ) {
+    return lessThan + uri + greaterThan
+  }
+
+  return uri
+}
+
+
+/***/ }),
 /* 189 */,
 /* 190 */,
 /* 191 */,
@@ -10011,7 +10223,7 @@ var lowercaseX = 'x'
 
 var tabSize = 4
 var looseListItemExpression = /\n\n(?!\s*$)/
-var taskItemExpression = /^\[([ \t]|x|X)][ \t]/
+var taskItemExpression = /^\[([ X\tx])][ \t]/
 var bulletExpression = /^([ \t]*)([*+-]|\d+[.)])( {1,4}(?! )| |\t|$|(?=\n))([^\n]*)/
 var pedanticBulletExpression = /^([ \t]*)([*+-]|\d+[.)])([ \t]+)/
 var initialIndentExpression = /^( {1,4}|\t)?/gm
@@ -10025,7 +10237,7 @@ function list(eat, value, silent) {
   var index = 0
   var length = value.length
   var start = null
-  var size = 0
+  var size
   var queue
   var ordered
   var character
@@ -10036,7 +10248,7 @@ function list(eat, value, silent) {
   var currentMarker
   var content
   var line
-  var prevEmpty
+  var previousEmpty
   var empty
   var items
   var allLines
@@ -10053,19 +10265,11 @@ function list(eat, value, silent) {
   while (index < length) {
     character = value.charAt(index)
 
-    if (character === tab) {
-      size += tabSize - (size % tabSize)
-    } else if (character === space) {
-      size++
-    } else {
+    if (character !== tab && character !== space) {
       break
     }
 
     index++
-  }
-
-  if (size >= tabSize) {
-    return
   }
 
   character = value.charAt(index)
@@ -10094,6 +10298,14 @@ function list(eat, value, silent) {
       !queue ||
       !(character === dot || (commonmark && character === rightParenthesis))
     ) {
+      return
+    }
+
+    /* Slightly abusing `silent` mode, whose goal is to make interrupting
+     * paragraphs work.
+     * Well, that’s exactly what we want to do here: don’t interrupt:
+     * 2. here, because the “list” doesn’t start with `1`. */
+    if (silent && queue !== '1') {
       return
     }
 
@@ -10130,7 +10342,6 @@ function list(eat, value, silent) {
       nextIndex = length
     }
 
-    end = index + tabSize
     size = 0
 
     while (index < length) {
@@ -10145,10 +10356,6 @@ function list(eat, value, silent) {
       }
 
       index++
-    }
-
-    if (size >= tabSize) {
-      indented = true
     }
 
     if (item && size >= item.indent) {
@@ -10251,7 +10458,7 @@ function list(eat, value, silent) {
       }
     }
 
-    prevEmpty = empty
+    previousEmpty = empty
     empty = !prefixed && !trim(content).length
 
     if (indented && item) {
@@ -10275,13 +10482,13 @@ function list(eat, value, silent) {
       allLines = allLines.concat(emptyLines, line)
       emptyLines = []
     } else if (empty) {
-      if (prevEmpty && !commonmark) {
+      if (previousEmpty && !commonmark) {
         break
       }
 
       emptyLines.push(line)
     } else {
-      if (prevEmpty) {
+      if (previousEmpty) {
         break
       }
 
@@ -10480,21 +10687,17 @@ reference.locator = locate
 
 var link = 'link'
 var image = 'image'
-var footnote = 'footnote'
 var shortcut = 'shortcut'
 var collapsed = 'collapsed'
 var full = 'full'
-var space = ' '
 var exclamationMark = '!'
 var leftSquareBracket = '['
 var backslash = '\\'
 var rightSquareBracket = ']'
-var caret = '^'
 
 function reference(eat, value, silent) {
   var self = this
   var commonmark = self.options.commonmark
-  var footnotes = self.options.footnotes
   var character = value.charAt(0)
   var index = 0
   var length = value.length
@@ -10525,19 +10728,6 @@ function reference(eat, value, silent) {
   index++
   intro += character
   queue = ''
-
-  // Check whether we’re eating a footnote.
-  if (footnotes && value.charAt(index) === caret) {
-    // Exit if `![^` is found, so the `!` will be seen as text after this,
-    // and we’ll enter this function again when `[^` is found.
-    if (type === image) {
-      return
-    }
-
-    intro += caret
-    index++
-    type = footnote
-  }
 
   // Eat the text.
   depth = 0
@@ -10595,13 +10785,7 @@ function reference(eat, value, silent) {
 
   character = value.charAt(index)
 
-  // Inline footnotes cannot have a label.
-  // If footnotes are enabled, link labels cannot start with a caret.
-  if (
-    type !== footnote &&
-    character === leftSquareBracket &&
-    (!footnotes || value.charAt(index + 1) !== caret)
-  ) {
+  if (character === leftSquareBracket) {
     identifier = ''
     queue += character
     index++
@@ -10658,13 +10842,6 @@ function reference(eat, value, silent) {
     return true
   }
 
-  if (type === footnote && content.indexOf(space) !== -1) {
-    return eat(subvalue)({
-      type: footnote,
-      children: this.tokenizeInline(content, eat.now())
-    })
-  }
-
   now = eat.now()
   now.column += intro.length
   now.offset += intro.length
@@ -10673,18 +10850,15 @@ function reference(eat, value, silent) {
   node = {
     type: type + 'Reference',
     identifier: normalize(identifier),
-    label: identifier
-  }
-
-  if (type === link || type === image) {
-    node.referenceType = referenceType
+    label: identifier,
+    referenceType: referenceType
   }
 
   if (type === link) {
     exit = self.enterLink()
     node.children = self.tokenizeInline(content, now)
     exit()
-  } else if (type === image) {
+  } else {
     node.alt = self.decode.raw(self.unescape(content), now) || null
   }
 
@@ -10746,9 +10920,1562 @@ function checkMode (stat, options) {
 /* 201 */,
 /* 202 */,
 /* 203 */,
-/* 204 */,
-/* 205 */,
-/* 206 */,
+/* 204 */
+/***/ (function(module) {
+
+module.exports = {"nbsp":" ","iexcl":"¡","cent":"¢","pound":"£","curren":"¤","yen":"¥","brvbar":"¦","sect":"§","uml":"¨","copy":"©","ordf":"ª","laquo":"«","not":"¬","shy":"­","reg":"®","macr":"¯","deg":"°","plusmn":"±","sup2":"²","sup3":"³","acute":"´","micro":"µ","para":"¶","middot":"·","cedil":"¸","sup1":"¹","ordm":"º","raquo":"»","frac14":"¼","frac12":"½","frac34":"¾","iquest":"¿","Agrave":"À","Aacute":"Á","Acirc":"Â","Atilde":"Ã","Auml":"Ä","Aring":"Å","AElig":"Æ","Ccedil":"Ç","Egrave":"È","Eacute":"É","Ecirc":"Ê","Euml":"Ë","Igrave":"Ì","Iacute":"Í","Icirc":"Î","Iuml":"Ï","ETH":"Ð","Ntilde":"Ñ","Ograve":"Ò","Oacute":"Ó","Ocirc":"Ô","Otilde":"Õ","Ouml":"Ö","times":"×","Oslash":"Ø","Ugrave":"Ù","Uacute":"Ú","Ucirc":"Û","Uuml":"Ü","Yacute":"Ý","THORN":"Þ","szlig":"ß","agrave":"à","aacute":"á","acirc":"â","atilde":"ã","auml":"ä","aring":"å","aelig":"æ","ccedil":"ç","egrave":"è","eacute":"é","ecirc":"ê","euml":"ë","igrave":"ì","iacute":"í","icirc":"î","iuml":"ï","eth":"ð","ntilde":"ñ","ograve":"ò","oacute":"ó","ocirc":"ô","otilde":"õ","ouml":"ö","divide":"÷","oslash":"ø","ugrave":"ù","uacute":"ú","ucirc":"û","uuml":"ü","yacute":"ý","thorn":"þ","yuml":"ÿ","fnof":"ƒ","Alpha":"Α","Beta":"Β","Gamma":"Γ","Delta":"Δ","Epsilon":"Ε","Zeta":"Ζ","Eta":"Η","Theta":"Θ","Iota":"Ι","Kappa":"Κ","Lambda":"Λ","Mu":"Μ","Nu":"Ν","Xi":"Ξ","Omicron":"Ο","Pi":"Π","Rho":"Ρ","Sigma":"Σ","Tau":"Τ","Upsilon":"Υ","Phi":"Φ","Chi":"Χ","Psi":"Ψ","Omega":"Ω","alpha":"α","beta":"β","gamma":"γ","delta":"δ","epsilon":"ε","zeta":"ζ","eta":"η","theta":"θ","iota":"ι","kappa":"κ","lambda":"λ","mu":"μ","nu":"ν","xi":"ξ","omicron":"ο","pi":"π","rho":"ρ","sigmaf":"ς","sigma":"σ","tau":"τ","upsilon":"υ","phi":"φ","chi":"χ","psi":"ψ","omega":"ω","thetasym":"ϑ","upsih":"ϒ","piv":"ϖ","bull":"•","hellip":"…","prime":"′","Prime":"″","oline":"‾","frasl":"⁄","weierp":"℘","image":"ℑ","real":"ℜ","trade":"™","alefsym":"ℵ","larr":"←","uarr":"↑","rarr":"→","darr":"↓","harr":"↔","crarr":"↵","lArr":"⇐","uArr":"⇑","rArr":"⇒","dArr":"⇓","hArr":"⇔","forall":"∀","part":"∂","exist":"∃","empty":"∅","nabla":"∇","isin":"∈","notin":"∉","ni":"∋","prod":"∏","sum":"∑","minus":"−","lowast":"∗","radic":"√","prop":"∝","infin":"∞","ang":"∠","and":"∧","or":"∨","cap":"∩","cup":"∪","int":"∫","there4":"∴","sim":"∼","cong":"≅","asymp":"≈","ne":"≠","equiv":"≡","le":"≤","ge":"≥","sub":"⊂","sup":"⊃","nsub":"⊄","sube":"⊆","supe":"⊇","oplus":"⊕","otimes":"⊗","perp":"⊥","sdot":"⋅","lceil":"⌈","rceil":"⌉","lfloor":"⌊","rfloor":"⌋","lang":"〈","rang":"〉","loz":"◊","spades":"♠","clubs":"♣","hearts":"♥","diams":"♦","quot":"\"","amp":"&","lt":"<","gt":">","OElig":"Œ","oelig":"œ","Scaron":"Š","scaron":"š","Yuml":"Ÿ","circ":"ˆ","tilde":"˜","ensp":" ","emsp":" ","thinsp":" ","zwnj":"‌","zwj":"‍","lrm":"‎","rlm":"‏","ndash":"–","mdash":"—","lsquo":"‘","rsquo":"’","sbquo":"‚","ldquo":"“","rdquo":"”","bdquo":"„","dagger":"†","Dagger":"‡","permil":"‰","lsaquo":"‹","rsaquo":"›","euro":"€"};
+
+/***/ }),
+/* 205 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = serializeAbbreviatedTag
+
+// Serialize a tag, excluding attributes.
+function serializeAbbreviatedTag(node) {
+  return (
+    '<' +
+    (node.close ? '/' : '') +
+    (node.name || '') +
+    /* istanbul ignore next - currently not used on self-closing tags */
+    (node.selfClosing ? '/' : '') +
+    '>'
+  )
+}
+
+
+/***/ }),
+/* 206 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var stringifyPosition = __webpack_require__(591)
+var parseEntities = __webpack_require__(277)
+var serializeCharCode = __webpack_require__(677)
+var serializeFormattedCode = __webpack_require__(144)
+var serializeAbbreviatedTag = __webpack_require__(205)
+var removePositions = __webpack_require__(888)
+var esIdentifier = __webpack_require__(331)
+var whitespace = __webpack_require__(222)
+var dedentExpression = __webpack_require__(801)
+
+module.exports = parse
+
+var own = {}.hasOwnProperty
+
+var identifierStart = esIdentifier.identifierStart
+var identifier = esIdentifier.identifier
+
+var tab = 9 // '\t'
+var lineFeed = 10 // '\n'
+var space = 32 // ' '
+var quotationMark = 34 // '"'
+var apostrophe = 39 // "'"
+var dash = 45 // '-'
+var dot = 46 // '.'
+var slash = 47 // '/'
+var colon = 58 // ':'
+var lessThan = 60 // '<'
+var equalsTo = 61 // '='
+var greaterThan = 62 // '>'
+var graveAccent = 96 // '`'
+var leftCurlyBrace = 123 // '{'
+var rightCurlyBrace = 125 // '}'
+var tilde = 126 // '~'
+
+var suggestionIdentifierStart = 'a letter, `$`, or `_`'
+var suggestionIdentifier = 'letters, digits, `$`, or `_`'
+var suggestionBeforeAttribute = 'whitespace before attributes'
+var suggestionBeforeInitializer = '`=` to initialize a value'
+var suggestionValueStart = '`"`, `\'`, or `{`'
+var suggestionEnd = 'the end of the tag'
+var suggestionTagEnd = '`>` to end the tag'
+
+var parseEntitiesOptions = {nonTerminated: false}
+
+function parse(parser) {
+  var proto = parser.prototype
+  var spans = proto.inlineTokenizers
+  var blocks = proto.blockTokenizers
+  var inlineMethods = proto.inlineMethods
+  var blockMethods = proto.blockMethods
+
+  // Replace HTML in order with MDX.
+  inlineMethods.splice(inlineMethods.indexOf('html'), 1, 'mdx')
+  blockMethods.splice(blockMethods.indexOf('html'), 1, 'mdx')
+  // Remove indented code and autolinks.
+  blockMethods.splice(blockMethods.indexOf('indentedCode'), 1)
+  inlineMethods.splice(inlineMethods.indexOf('autoLink'), 1)
+
+  // Replace tokenizers.
+  spans.autoLink = undefined
+  spans.html = undefined
+  spans.mdx = createParser(false)
+  blocks.html = undefined
+  blocks.indentedCode = undefined
+  blocks.mdx = createParser(true)
+
+  // Overwrite paragraph to ignore whitespace around line feeds.
+  blocks.paragraph = createParagraphParser(blocks.paragraph)
+
+  // Find tokens fast.
+  spans.mdx.locator = locateMdx
+
+  Object.keys(proto).forEach(interrupt)
+
+  function createParser(block) {
+    parse.displayName = 'mdx' + (block ? 'Block' : 'Span')
+    return parse
+    function parse(eat, value, silent) {
+      return mdxParser.call(this, eat, value, silent, block)
+    }
+  }
+
+  function createParagraphParser(oParagraph) {
+    return parseParagraph
+    function parseParagraph(eat, value, silent) {
+      return paragraph.call(this, eat, value, silent, oParagraph)
+    }
+  }
+
+  function interrupt(key) {
+    var prefix = 'interrupt'
+
+    if (key.slice(0, prefix.length) === prefix) {
+      proto[key] = proto[key].filter(notHtmlOrIndentedCode)
+    }
+
+    function notHtmlOrIndentedCode(tuple) {
+      var name = tuple[0]
+      return name !== 'html' && name !== 'indentedCode'
+    }
+  }
+}
+
+function mdxParser(eat, value, silent, block) {
+  var self = this
+  var clean = self.options.position ? noop : removePositions
+  var file = self.file
+  var index = 0
+  var place = Object.assign(eat.now(), {index: index})
+  var contentTokenizer = 'tokenize' + (block ? 'Block' : 'Inline')
+  var node
+  var content
+
+  // Parser state.
+  var state = block ? beforeMdxBlock : beforeMdxSpan
+  var elementStack = [] // Current open elements.
+  var stack = [] // Current open tokens.
+  var settled = false
+  var crashed = false
+
+  // Shared space.
+  var size
+  var sizeOpen
+  var currentTag
+
+  // Enter adapters.
+  var onenter = {
+    tag: onentertag,
+    closingSlash: onenterclosingslash,
+    attributeExpression: onenteranyattribute,
+    attributeName: onenteranyattribute,
+    selfClosingSlash: onenterselfclosingslash
+  }
+
+  // Exit adapters.
+  var onexit = {
+    closingSlash: onclosingslash,
+    primaryName: onprimaryname,
+    memberName: onmembername,
+    localName: onlocalname,
+    name: onname,
+    attributeName: onattributename,
+    attributeLocalName: onattributelocalname,
+    attributeValue: onattributevalue,
+    attributeValueExpression: onattributevalueexpression,
+    attributeExpression: onattributeexpression,
+    selfClosingSlash: onselfclosingslash,
+    tag: ontag,
+    expression: onexpression
+  }
+
+  // Run the state machine.
+  main()
+
+  /* istanbul ignore if - used by interruptors, which we’re not using. */
+  if (silent) {
+    return !crashed
+  }
+
+  if (crashed) {
+    return
+  }
+
+  // Elements have nodes in them.
+  // Potentially recursive MDX.
+  if (node.type === 'mdxBlockElement' || node.type === 'mdxSpanElement') {
+    node.children =
+      content.end === undefined
+        ? []
+        : self[contentTokenizer](slice(content), content.start)
+  }
+  // Expressions are literal.
+  else {
+    node.value = dedentExpression(slice(content, 1, 1))
+  }
+
+  return eat(value.slice(0, index))(node)
+
+  //
+  // State management.
+  //
+
+  // Main loop (note that `index` is modified by `consume`).
+  function main() {
+    /* eslint-disable-next-line no-unmodified-loop-condition */
+    while (!settled) {
+      state(value.charCodeAt(index))
+    }
+  }
+
+  // Get the current point.
+  function now() {
+    return Object.assign({}, place)
+  }
+
+  // Clone the current point: note that tokens also have an `index` in their
+  // points, refererring to the place in the input string, which we don’t want
+  // in the tree.
+  function point(source) {
+    return {line: source.line, column: source.column, offset: source.offset}
+  }
+
+  // Clone the position of a token.
+  function position(token) {
+    return {start: point(token.start), end: point(token.end)}
+  }
+
+  // Move a character forward.
+  function consume() {
+    // Line ending; assumes CR is not used (remark removes those).
+    if (value.charCodeAt(index) === lineFeed) {
+      place.line++
+      place.column = 1
+    }
+    // Anything else.
+    else {
+      place.column++
+    }
+
+    index++
+
+    place.offset++
+    place.index = index
+  }
+
+  // Start a token.
+  function enter(type) {
+    var token = {type: type, start: now()}
+
+    emit(onenter, token)
+
+    stack.push(token)
+  }
+
+  // Stop a token.
+  function exit() {
+    var token = stack.pop()
+
+    token.end = now()
+
+    emit(onexit, token)
+  }
+
+  // Switch to the given state.
+  function then(next) {
+    state = next
+  }
+
+  // Emit a token.
+  function emit(adapters, token) {
+    if (own.call(adapters, token.type)) {
+      adapters[token.type](token)
+    }
+  }
+
+  // Crash at a nonconforming character.
+  function crash(at, expect) {
+    var code = value.charCodeAt(index)
+    var label
+    var base
+    var message
+
+    // Non-EOF.
+    if (code === code) {
+      label = 'character'
+      base =
+        'Unexpected character ' +
+        serializeFormattedCode(code) +
+        ' (' +
+        serializeCharCode(code) +
+        ')'
+    }
+    // EOF.
+    else {
+      label = 'eof'
+      base = 'Unexpected end of file'
+    }
+
+    message = base + ' ' + at + ', expected ' + expect
+
+    fail(message, now(), 'unexpected-' + label)
+  }
+
+  function fail(reason, point, label) {
+    crashed = true
+    settled = true
+
+    /* istanbul ignore else - could be used by plugins. */
+    if (!silent) {
+      file.fail(reason, point, 'remark-mdx:' + label)
+    }
+  }
+
+  function slice(token, more, less) {
+    return value.slice(
+      token.start.index + (more || 0),
+      token.end.index - (less || 0)
+    )
+  }
+
+  //
+  // Adapters.
+  //
+
+  // Define a new tag node.
+  function onentertag() {
+    currentTag = {
+      type: 'mdxTag',
+      name: null,
+      close: false,
+      selfClosing: false,
+      attributes: []
+    }
+  }
+
+  // Crash if we find an closing tag if there are no elements open.
+  function onenterclosingslash() {
+    if (elementStack.length === 0) {
+      crash('before name', 'an opening tag first as there are no open elements')
+    }
+  }
+
+  // Crash if we find an attribute on a closing tag.
+  function onenteranyattribute() {
+    if (currentTag.close) {
+      crash(
+        'on closing tag after name',
+        suggestionEnd + ' instead of attributes on a closing tag'
+      )
+    }
+  }
+
+  // Crash if we find a self-closing closing tag (`</a/>`)
+  function onenterselfclosingslash() {
+    if (currentTag.close) {
+      crash('on closing tag before tag end', suggestionEnd)
+    }
+  }
+
+  function onclosingslash() {
+    currentTag.close = true
+  }
+
+  function onprimaryname(token) {
+    currentTag.name = slice(token)
+  }
+
+  function onmembername(token) {
+    currentTag.name += '.' + slice(token)
+  }
+
+  function onlocalname(token) {
+    currentTag.name += ':' + slice(token)
+  }
+
+  // Crash if we find a closing tag that doesn’t match the currently open
+  // element.
+  function onname() {
+    var currentElement = elementStack[elementStack.length - 1]
+
+    // A different element is open.
+    if (currentTag.close && currentElement.name !== currentTag.name) {
+      fail(
+        'Unexpected closing tag `' +
+          serializeAbbreviatedTag(currentTag) +
+          '`, expected corresponding MDX closing tag for `' +
+          serializeAbbreviatedTag(currentElement) +
+          '` (' +
+          stringifyPosition(currentElement) +
+          ')',
+        now(),
+        'end-tag-mismatch'
+      )
+    }
+  }
+
+  // Add the attribute to the tag.
+  function onattributename(token) {
+    currentTag.attributes.push({
+      type: 'mdxAttribute',
+      name: slice(token),
+      value: null,
+      position: position(token)
+    })
+  }
+
+  // Change the attribute’s name to include the local name.
+  function onattributelocalname(token) {
+    var attributes = currentTag.attributes
+    var attribute = attributes[attributes.length - 1]
+
+    attribute.name += ':' + slice(token)
+    attribute.position.end = point(token.end)
+  }
+
+  // Add the attribute value to the attribute.
+  function onattributevalue(token) {
+    var attributes = currentTag.attributes
+    var attribute = attributes[attributes.length - 1]
+
+    attribute.value = parseEntities(slice(token, 1, 1), parseEntitiesOptions)
+    attribute.position.end = point(token.end)
+  }
+
+  // Add the attribute value to the attribute.
+  function onattributevalueexpression(token) {
+    var attributes = currentTag.attributes
+    var attribute = attributes[attributes.length - 1]
+
+    attribute.value = {
+      type: 'mdxValueExpression',
+      value: dedentExpression(slice(token, 1, 1)),
+      position: position(token)
+    }
+
+    attribute.position.end = point(token.end)
+  }
+
+  // Add the attribute to the tag.
+  function onattributeexpression(token) {
+    currentTag.attributes.push({
+      type: 'mdxAttributeExpression',
+      value: dedentExpression(slice(token, 1, 1)),
+      position: position(token)
+    })
+  }
+
+  // Mark the node as self-closing.
+  function onselfclosingslash() {
+    currentTag.selfClosing = true
+  }
+
+  // Handle the tag.
+  function ontag(token) {
+    currentTag.position = position(token)
+
+    if (elementStack.length === 0) {
+      node = {
+        type: 'mdx' + (block ? 'Block' : 'Span') + 'Element',
+        name: currentTag.name,
+        attributes: currentTag.attributes
+      }
+
+      content = {type: 'content', start: token.end}
+    }
+
+    // Closing tag (`</x>`).
+    if (currentTag.close) {
+      clean(elementStack.pop())
+
+      if (elementStack.length === 0) {
+        content.end = token.start
+      }
+    }
+    // Self-closing tag (`<x/>`).
+    else if (currentTag.selfClosing) {
+      clean(currentTag)
+    }
+    // Opening tag (`<x>`).
+    else {
+      elementStack.push(currentTag)
+    }
+
+    if (elementStack.length === 0) {
+      then(block ? afterMdxBlock : afterMdxSpan)
+    }
+  }
+
+  // Handle the expression.
+  function onexpression(token) {
+    if (elementStack.length === 0) {
+      node = {type: 'mdx' + (block ? 'Block' : 'Span') + 'Expression'}
+      content = {type: 'content', start: token.start, end: token.end}
+      then(block ? afterMdxBlock : afterMdxSpan)
+    }
+  }
+
+  //
+  // State machine.
+  //
+
+  function beforeMdxBlock(code) {
+    // In-line Markdown whitespace.
+    if (code === tab || code === space) {
+      consume()
+    }
+    // Something else.
+    else {
+      then(beforeMdxSpan)
+    }
+  }
+
+  // Start of an expression or element span.
+  function beforeMdxSpan(code) {
+    // Found our start
+    if (code === leftCurlyBrace || code === lessThan) {
+      // Reconsume.
+      then(data)
+    }
+    // Something else.
+    else {
+      crashed = true
+      settled = true
+    }
+  }
+
+  // End of a span.
+  function afterMdxSpan() {
+    settled = true
+  }
+
+  // End of an MDX block.
+  function afterMdxBlock(code) {
+    // In-line Markdown whitespace.
+    if (code === tab || code === space) {
+      consume()
+    }
+    // Found our end!
+    else if (code === lineFeed || code !== code) {
+      settled = true
+    }
+    // Something else, not a block.
+    else {
+      crashed = true
+      settled = true
+    }
+  }
+
+  // Children.
+  function data(code) {
+    // Start a new tag.
+    if (code === lessThan) {
+      then(beforeName)
+      enter('tag')
+      consume()
+    }
+    // Start a new expression.
+    else if (code === leftCurlyBrace) {
+      then(expression)
+      enter('expression')
+      size = 1
+      consume()
+    }
+    // Text.
+    else {
+      // Reconsume.
+      then(text)
+      enter('text')
+    }
+  }
+
+  // Right after `<`, before an optional name.
+  function beforeName(code) {
+    // Closing tag.
+    if (code === slash) {
+      then(beforeClosingTagName)
+      enter('closingSlash')
+      consume()
+      exit()
+    }
+    // Fragment opening tag.
+    else if (code === greaterThan) {
+      then(data)
+      enter('name')
+      exit()
+      consume()
+      exit()
+    }
+    // Whitespace, remain.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Start of a name.
+    else if (identifierStart(code)) {
+      then(primaryName)
+      enter('name')
+      enter('primaryName')
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'before name',
+        'a character that can start a name, such as ' +
+          suggestionIdentifierStart
+      )
+    }
+  }
+
+  // We’re at the start of a closing tag, right after `</`.
+  function beforeClosingTagName(code) {
+    // Fragment closing tag.
+    if (code === greaterThan) {
+      then(data)
+      enter('name')
+      exit()
+      consume()
+      exit()
+    }
+    // Whitespace before name: stay in state.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Start of a closing tag name.
+    else if (identifierStart(code)) {
+      then(primaryName)
+      enter('name')
+      enter('primaryName')
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'before name',
+        'a character that can start a name, such as ' +
+          suggestionIdentifierStart
+      )
+    }
+  }
+
+  // We’re inside the primary name.
+  function primaryName(code) {
+    // Continuation of name: remain.
+    if (code === dash || identifier(code)) {
+      consume()
+    }
+    // End of name.
+    else if (
+      code === dot ||
+      code === slash ||
+      code === colon ||
+      code === greaterThan ||
+      code === leftCurlyBrace ||
+      whitespace(code)
+    ) {
+      then(afterPrimaryName)
+      exit()
+      // Reconsume.
+    }
+    // Exception.
+    else {
+      crash(
+        'in name',
+        'a name character such as ' +
+          suggestionIdentifier +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re after a name.
+  function afterPrimaryName(code) {
+    // Start of a member name.
+    if (code === dot) {
+      then(beforeMemberName)
+      consume()
+    }
+    // Start of a local name.
+    else if (code === colon) {
+      then(beforeLocalName)
+      consume()
+    }
+    // End of name.
+    else if (
+      code === slash ||
+      code === greaterThan ||
+      code === leftCurlyBrace ||
+      identifierStart(code)
+    ) {
+      then(beforeAttribute)
+      exit()
+      // Reconsume.
+    }
+    // Remain.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'after name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’ve seen a `.` and are expecting a member name.
+  function beforeMemberName(code) {
+    // Start of a member name.
+    if (identifierStart(code)) {
+      then(memberName)
+      enter('memberName')
+      consume()
+    }
+    // Whitespace before member name: stay in state.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'before member name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re inside the member name.
+  function memberName(code) {
+    // Continuation of member name: stay in state
+    if (code === dash || identifier(code)) {
+      consume()
+    }
+    // End of member name (note that namespaces and members can’t be combined).
+    else if (
+      whitespace(code) ||
+      code === dot ||
+      code === greaterThan ||
+      code === slash ||
+      code === leftCurlyBrace
+    ) {
+      then(afterMemberName)
+      exit()
+      // Reconsume.
+    }
+    // Exception.
+    else {
+      crash(
+        'in member name',
+        'a name character such as ' +
+          suggestionIdentifier +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re after a member name: this is the same as `afterPrimaryName` but we
+  // don’t expect colons.
+  function afterMemberName(code) {
+    // Start another member name.
+    if (code === dot) {
+      then(beforeMemberName)
+      consume()
+    }
+    // End of name.
+    else if (
+      code === greaterThan ||
+      code === slash ||
+      code === leftCurlyBrace ||
+      identifierStart(code)
+    ) {
+      then(beforeAttribute)
+      exit()
+      // Reconsume.
+    }
+    // Continue.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'after member name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’ve seen a `:`, and are expecting a local name.
+  function beforeLocalName(code) {
+    // Whitespace, stay in state.
+    if (whitespace(code)) {
+      consume()
+    }
+    // Start of a local name.
+    else if (identifierStart(code)) {
+      then(localName)
+      enter('localName')
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'before local name',
+        'a character that can start a name, such as ' +
+          suggestionIdentifierStart
+      )
+    }
+  }
+
+  // We’re inside the local name.
+  function localName(code) {
+    // Continuation of local name: stay in state
+    if (code === dash || identifier(code)) {
+      consume()
+    }
+    // End of local name (note that we don’t expect another colon, or a member).
+    else if (
+      code === slash ||
+      code === greaterThan ||
+      code === leftCurlyBrace ||
+      whitespace(code)
+    ) {
+      then(afterLocalName)
+      exit()
+      exit()
+      // Reconsume.
+    }
+    // Exception.
+    else {
+      crash(
+        'in local name',
+        'a name character such as ' +
+          suggestionIdentifier +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re after a local name: this is the same as `afterPrimaryName` but we
+  // don’t expect colons or periods.
+  function afterLocalName(code) {
+    // End of name.
+    if (
+      code === slash ||
+      code === greaterThan ||
+      code === leftCurlyBrace ||
+      identifierStart(code)
+    ) {
+      then(beforeAttribute)
+      // Reconsume.
+    }
+    // Continue.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'after local name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  function beforeAttribute(code) {
+    // Mark as self-closing.
+    if (code === slash) {
+      then(selfClosing)
+      enter('selfClosingSlash')
+      consume()
+      exit()
+    }
+    // End of tag.
+    else if (code === greaterThan) {
+      then(data)
+      consume()
+      exit()
+    }
+    // Attribute expression.
+    else if (code === leftCurlyBrace) {
+      then(attributeExpression)
+      enter('attributeExpression')
+      size = 1
+      consume()
+    }
+    // Whitespace: remain.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Start of an attribute name.
+    else if (identifierStart(code)) {
+      then(attributeName)
+      enter('attributeName')
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'before attribute name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re in an attribute expression.
+  function attributeExpression(code) {
+    // Another opening brace.
+    if (code === leftCurlyBrace) {
+      size++
+      consume()
+    }
+    // A closing brace.
+    else if (code === rightCurlyBrace) {
+      // Done.
+      if (size === 1) {
+        then(beforeAttribute)
+        size = undefined
+        consume()
+        exit()
+      }
+      // Continue.
+      else {
+        size--
+        consume()
+      }
+    }
+    // Continuation.
+    else if (code === code) {
+      consume()
+    }
+    // Exception (EOF).
+    else {
+      crash('in attribute expression', 'a corresponding closing brace for `{`')
+    }
+  }
+
+  // We’re right after the first character of an attribute.
+  function attributeName(code) {
+    // Continuation of the attribute name.
+    if (code === dash || identifier(code)) {
+      consume()
+    }
+    // End of attribute name or tag.
+    else if (
+      code === colon ||
+      code === equalsTo ||
+      code === greaterThan ||
+      code === slash ||
+      code === leftCurlyBrace ||
+      whitespace(code)
+    ) {
+      // Reconsume.
+      then(afterAttributeName)
+      exit()
+    }
+    // Exception.
+    else {
+      crash(
+        'in attribute name',
+        'an attribute name character such as ' +
+          suggestionIdentifier +
+          '; ' +
+          suggestionBeforeInitializer +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re after an attribute name, probably finding an equals.
+  function afterAttributeName(code) {
+    // Start of a local name.
+    if (code === colon) {
+      then(beforeAttributeLocalName)
+      consume()
+    }
+    // Start of an attribute value.
+    else if (code === equalsTo) {
+      then(beforeAttributeValue)
+      consume()
+    }
+    // End of tag / new attribute.
+    else if (
+      code === greaterThan ||
+      code === slash ||
+      code === leftCurlyBrace ||
+      identifierStart(code)
+    ) {
+      // Reconsume.
+      then(beforeAttribute)
+    }
+    // Continuation.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'after attribute name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeInitializer +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’ve seen a `:`, and are expecting a local name.
+  function beforeAttributeLocalName(code) {
+    // Start of a local name.
+    if (identifierStart(code)) {
+      then(attributeLocalName)
+      enter('attributeLocalName')
+      consume()
+    }
+    // Whitespace, stay in state.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'before local attribute name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeInitializer +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re right after the first character of a local attribute name.
+  function attributeLocalName(code) {
+    // Continuation of the local attribute name.
+    if (code === dash || identifier(code)) {
+      consume()
+    }
+    // End of tag / attribute name.
+    else if (
+      code === slash ||
+      code === equalsTo ||
+      code === greaterThan ||
+      code === leftCurlyBrace ||
+      whitespace(code)
+    ) {
+      // Reconsume.
+      then(afterAttributeLocalName)
+      exit()
+    }
+    // Exception.
+    else {
+      crash(
+        'in local attribute name',
+        'an attribute name character such as ' +
+          suggestionIdentifier +
+          '; ' +
+          suggestionBeforeInitializer +
+          '; ' +
+          suggestionBeforeAttribute +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re after a local attribute name, expecting an equals.
+  function afterAttributeLocalName(code) {
+    // Start of an attribute value.
+    if (code === equalsTo) {
+      then(beforeAttributeValue)
+      consume()
+    }
+    // End of tag / new attribute.
+    else if (
+      code === slash ||
+      code === greaterThan ||
+      code === leftCurlyBrace ||
+      identifierStart(code)
+    ) {
+      // Reconsume.
+      then(beforeAttribute)
+    }
+    // Continuation.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'after local attribute name',
+        'a character that can start an attribute name, such as ' +
+          suggestionIdentifierStart +
+          '; ' +
+          suggestionBeforeInitializer +
+          '; or ' +
+          suggestionEnd
+      )
+    }
+  }
+
+  // We’re after an attribute value, expecting quotes and such.
+  function beforeAttributeValue(code) {
+    // Start of double quoted value.
+    if (code === quotationMark) {
+      then(attributeValueDoubleQuoted)
+      enter('attributeValue')
+      consume()
+    }
+    // Start of quoted value.
+    else if (code === apostrophe) {
+      then(attributeValueSingleQuoted)
+      enter('attributeValue')
+      consume()
+    }
+    // Start of an assignment expression.
+    else if (code === leftCurlyBrace) {
+      then(attributeValueExpression)
+      enter('attributeValueExpression')
+      size = 1
+      consume()
+    }
+    // Continuation.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash(
+        'before attribute value',
+        'a character that can start an attribute value, such as ' +
+          suggestionValueStart
+      )
+    }
+  }
+
+  // We’re in a double quoted attribute value.
+  function attributeValueDoubleQuoted(code) {
+    // Done.
+    if (code === quotationMark) {
+      then(beforeAttribute)
+      consume()
+      exit()
+    }
+    // Continuation.
+    else if (code === code) {
+      consume()
+    }
+    // Exception (EOF).
+    else {
+      crash('in attribute value', 'a corresponding closing quote `"`')
+    }
+  }
+
+  // We’re in a single quoted attribute value.
+  function attributeValueSingleQuoted(code) {
+    // Done.
+    if (code === apostrophe) {
+      then(beforeAttribute)
+      consume()
+      exit()
+    }
+    // Continuation.
+    else if (code === code) {
+      consume()
+    }
+    // Exception (EOF).
+    else {
+      crash('in attribute value', "a corresponding closing quote `'`")
+    }
+  }
+
+  // We’re in a attribute value assignment expression.
+  function attributeValueExpression(code) {
+    // Another opening brance.
+    if (code === leftCurlyBrace) {
+      size++
+      consume()
+    }
+    // A closing brace.
+    else if (code === rightCurlyBrace) {
+      // Done.
+      if (size === 1) {
+        size = undefined
+        then(beforeAttribute)
+        consume()
+        exit()
+      }
+      // Continue.
+      else {
+        size--
+        consume()
+      }
+    }
+    // Continuation.
+    else if (code === code) {
+      consume()
+    }
+    // Exception (EOF).
+    else {
+      crash(
+        'in attribute value expression',
+        'a corresponding closing brace for `{`'
+      )
+    }
+  }
+
+  // Right after the slash on a name, e.g., `<asd /`.
+  function selfClosing(code) {
+    // End of tag.
+    if (code === greaterThan) {
+      then(data)
+      consume()
+      exit()
+    }
+    // Whitespace.
+    else if (whitespace(code)) {
+      consume()
+    }
+    // Exception.
+    else {
+      crash('after self-closing slash', suggestionTagEnd)
+    }
+  }
+
+  // Nested expression.
+  function expression(code) {
+    // Another opening brace.
+    if (code === leftCurlyBrace) {
+      size++
+      consume()
+    }
+    // A closing brace.
+    else if (code === rightCurlyBrace) {
+      // Done.
+      if (size === 1) {
+        then(data)
+        size = undefined
+        consume()
+        exit()
+      }
+      // Continue.
+      else {
+        size--
+        consume()
+      }
+    }
+    // Continuation.
+    else if (code === code) {
+      consume()
+    }
+    // Exception (EOF).
+    else {
+      crash('in expression', 'a corresponding closing brace for `{`')
+    }
+  }
+
+  // Text.
+  function text(code) {
+    var currentElement
+
+    // Note: the JSX spec defines `> and `}` on their own in text as incorrect.
+    // Acorn does conform but Babel doesn’t.
+    // We don’t conform either, as Markdown uses `>` is for block quotes, and
+    // it would prevent their use in JSX.
+
+    // Data.
+    if (code === lessThan || code === leftCurlyBrace) {
+      // Reconsume.
+      then(data)
+      exit()
+    }
+    // Skip code spans and fenced code block.
+    else if (code === graveAccent) {
+      then(accentQuotedOpen)
+      sizeOpen = 1
+      consume()
+    }
+    // Skip code spans and fenced code block.
+    else if (code === tilde) {
+      then(tildeQuotedOpen)
+      sizeOpen = 1
+      consume()
+    }
+    // Text.
+    else if (code === code) {
+      consume()
+    }
+    // Exception (EOF).
+    else {
+      currentElement = elementStack[elementStack.length - 1]
+      crash(
+        'in element',
+        'a corresponding MDX closing tag for `' +
+          serializeAbbreviatedTag(currentElement) +
+          '` (' +
+          stringifyPosition(currentElement) +
+          ')'
+      )
+    }
+  }
+
+  // Inside ticks.
+  function accentQuotedOpen(code) {
+    // More.
+    if (code === graveAccent) {
+      sizeOpen++
+      consume()
+    }
+    // Character.
+    else if (code === code) {
+      then(accentQuoted)
+      consume()
+    }
+    // EOF.
+    else {
+      crash('in code', 'a corresponding fence for `` ` ``')
+    }
+  }
+
+  // In tick quoted value.
+  function accentQuoted(code) {
+    // Closing fence?
+    if (code === graveAccent) {
+      then(accentQuotedClose)
+      size = 1
+      consume()
+    }
+    // Character.
+    else if (code === code) {
+      consume()
+    }
+    // EOF.
+    else {
+      crash('in code', 'a corresponding fence for `` ` ``')
+    }
+  }
+
+  // Closing fence?
+  function accentQuotedClose(code) {
+    // More.
+    if (code === graveAccent) {
+      size++
+      consume()
+    }
+    // Anything else.
+    else {
+      // Done!
+      if (size === sizeOpen) {
+        then(text)
+        sizeOpen = undefined
+        size = undefined
+        // Reconsume
+      }
+      // Nope.
+      else {
+        then(accentQuoted)
+        size = undefined
+        // Reconsume
+      }
+    }
+  }
+
+  // Inside tildes.
+  function tildeQuotedOpen(code) {
+    // More.
+    if (code === tilde) {
+      consume()
+      sizeOpen++
+    }
+    // Non-EOF.
+    else if (code === code) {
+      then(tildeQuoted)
+      consume()
+    }
+    // EOF.
+    else {
+      crash('in code', 'a corresponding fence for `~`')
+    }
+  }
+
+  // In tick quoted value.
+  function tildeQuoted(code) {
+    // Closing?
+    if (code === tilde) {
+      then(tildeQuotedClose)
+      consume()
+      size = 1
+    }
+    // Non-EOF.
+    else if (code === code) {
+      consume()
+    }
+    // EOF.
+    else {
+      crash('in code', 'a corresponding fence for `~`')
+    }
+  }
+
+  // Closing?
+  function tildeQuotedClose(code) {
+    // More.
+    if (code === tilde) {
+      consume()
+      size++
+    }
+    // Anything else.
+    else {
+      // Done!
+      if (size === sizeOpen) {
+        then(text)
+        sizeOpen = undefined
+        size = undefined
+        // Reconsume
+      }
+      // Nope.
+      else {
+        then(tildeQuoted)
+        size = undefined
+        // Reconsume
+      }
+    }
+  }
+}
+
+function paragraph(eat, value, silent, oParagraph) {
+  var start = /^[ \t\n]+/
+  var end = /[ \t\n]+$/
+  var between = /[ \t]*\n[ \t]*/g
+  var result = oParagraph.call(this, eat, value, silent)
+
+  /* istanbul ignore else - paragraph is currently last, so essentially always
+   * matches. */
+  if (result && result.type) {
+    cleanWhitespace(result, true, true)
+  }
+
+  return result
+
+  function cleanWhitespace(node, atStart, atEnd) {
+    if (node.type === 'text') {
+      return cleanText(node, atStart, atEnd)
+    }
+
+    if (node.children) {
+      return cleanAll(node, atStart, atEnd)
+    }
+
+    return false
+  }
+
+  function cleanAll(node, atStart, atEnd) {
+    var children = node.children
+    var length = children.length
+    var index = -1
+    var start = atStart
+    var child
+
+    while (++index < length) {
+      child = children[index]
+
+      start = cleanWhitespace(
+        child,
+        start,
+        index === length - 1 ? atEnd : false
+      )
+
+      if (child.type === 'text' && child.value.length === 0) {
+        children.splice(index, 1)
+        index--
+        length--
+      }
+    }
+
+    // Types of `paragraph` and its children (phrasing content) that *do not*
+    // have markers at their end.
+    // If we do have markers, it doesn’t matter whether we ended in a newline.
+    return node.type === 'paragraph' || node.type === 'text' ? start : false
+  }
+
+  function cleanText(node, atStart, atEnd) {
+    var value = node.value.replace(between, '\n')
+
+    if (atStart) value = value.replace(start, '')
+    if (atEnd) value = value.replace(end, '')
+
+    node.value = value
+
+    return value ? value.charCodeAt(value.length - 1) === lineFeed : atStart
+  }
+}
+
+function locateMdx(value, from) {
+  var brace = value.indexOf('{', from)
+  var angle = value.indexOf('<', from)
+  return angle === -1 ? brace : brace === -1 ? angle : Math.min(brace, angle)
+}
+
+function noop() {}
+
+
+/***/ }),
 /* 207 */,
 /* 208 */,
 /* 209 */,
@@ -10900,7 +12627,23 @@ function xlinkTransform(_, prop) {
 
 /***/ }),
 /* 221 */,
-/* 222 */,
+/* 222 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = whitespace
+
+var fromCharCode = String.fromCharCode
+var ws = /\s/
+
+function whitespace(code) {
+  return ws.test(fromCharCode(code))
+}
+
+
+/***/ }),
 /* 223 */,
 /* 224 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -11091,7 +12834,7 @@ function table(eat, value, silent) {
 
             if (queue.length > 1) {
               if (character) {
-                subvalue += queue.slice(0, queue.length - 1)
+                subvalue += queue.slice(0, -1)
                 queue = queue.charAt(queue.length - 1)
               } else {
                 subvalue += queue
@@ -11566,42 +13309,7 @@ exports.tag = new RegExp(
 
 /***/ }),
 /* 235 */,
-/* 236 */
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-"use strict";
-
-
-module.exports = visit
-
-var visitParents = __webpack_require__(92)
-
-var CONTINUE = visitParents.CONTINUE
-var SKIP = visitParents.SKIP
-var EXIT = visitParents.EXIT
-
-visit.CONTINUE = CONTINUE
-visit.SKIP = SKIP
-visit.EXIT = EXIT
-
-function visit(tree, test, visitor, reverse) {
-  if (typeof test === 'function' && typeof visitor !== 'function') {
-    reverse = visitor
-    visitor = test
-    test = null
-  }
-
-  visitParents(tree, test, overload, reverse)
-
-  function overload(node, parents) {
-    var parent = parents[parents.length - 1]
-    var index = parent ? parent.children.indexOf(node) : null
-    return visitor(node, index, parent)
-  }
-}
-
-
-/***/ }),
+/* 236 */,
 /* 237 */,
 /* 238 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -11648,7 +13356,43 @@ module.exports = LocationInfoOpenElementStackMixin;
 /* 239 */,
 /* 240 */,
 /* 241 */,
-/* 242 */,
+/* 242 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var parse = __webpack_require__(206)
+var serialize = __webpack_require__(460)
+
+module.exports = mdx
+
+// I think this is needed for webpack? 😔
+mdx.default = mdx
+
+function mdx() {
+  var parser = this.Parser
+  var compiler = this.Compiler
+
+  if (isRemarkParser(parser)) {
+    parse(parser)
+  }
+
+  if (isRemarkCompiler(compiler)) {
+    serialize(compiler)
+  }
+}
+
+function isRemarkParser(parser) {
+  return Boolean(parser && parser.prototype && parser.prototype.blockTokenizers)
+}
+
+function isRemarkCompiler(compiler) {
+  return Boolean(compiler && compiler.prototype && compiler.prototype.visitors)
+}
+
+
+/***/ }),
 /* 243 */,
 /* 244 */,
 /* 245 */,
@@ -13679,7 +15423,38 @@ function patch (fs) {
 
 
 /***/ }),
-/* 251 */,
+/* 251 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var visitChildren = __webpack_require__(997)
+
+module.exports = visitChildren(makeInitialWhiteSpaceSiblings)
+
+// Move white space starting a sentence up, so they are the siblings of
+// sentences.
+function makeInitialWhiteSpaceSiblings(child, index, parent) {
+  var children = child.children
+  var next
+
+  if (
+    children &&
+    children.length !== 0 &&
+    children[0].type === 'WhiteSpaceNode'
+  ) {
+    parent.children.splice(index, 0, children.shift())
+    next = children[0]
+
+    if (next && next.position && child.position) {
+      child.position.start = next.position.start
+    }
+  }
+}
+
+
+/***/ }),
 /* 252 */,
 /* 253 */,
 /* 254 */,
@@ -13695,7 +15470,6 @@ var find = __webpack_require__(908)
 var ns = __webpack_require__(744)
 var s = __webpack_require__(72)
 var h = __webpack_require__(84)
-var xtend = __webpack_require__(940)
 var count = __webpack_require__(126)
 
 module.exports = wrapper
@@ -13880,7 +15654,7 @@ function location(node, location, config) {
       reference.position &&
       reference.position.end
     ) {
-      pos.end = xtend(reference.position.end)
+      pos.end = Object.assign({}, reference.position.end)
     }
 
     if (verbose) {
@@ -15372,15 +17146,15 @@ var defaults = {
 // Characters.
 var tab = 9 // '\t'
 var lineFeed = 10 // '\n'
-var formFeed = 12 //  '\f'
+var formFeed = 12 // '\f'
 var space = 32 // ' '
-var ampersand = 38 //  '&'
-var semicolon = 59 //  ';'
-var lessThan = 60 //  '<'
-var equalsTo = 61 //  '='
-var numberSign = 35 //  '#'
-var uppercaseX = 88 //  'X'
-var lowercaseX = 120 //  'x'
+var ampersand = 38 // '&'
+var semicolon = 59 // ';'
+var lessThan = 60 // '<'
+var equalsTo = 61 // '='
+var numberSign = 35 // '#'
+var uppercaseX = 88 // 'X'
+var lowercaseX = 120 // 'x'
 var replacementCharacter = 65533 // '�'
 
 // Reference types.
@@ -15502,7 +17276,8 @@ function parse(value, settings) {
   // Wrap `handleWarning`.
   warning = handleWarning ? parseError : noop
 
-  // Ensure the algorithm walks over the first character and the end (inclusive).
+  // Ensure the algorithm walks over the first character and the end
+  // (inclusive).
   index--
   length++
 
@@ -15735,7 +17510,7 @@ function parse(value, settings) {
     }
   }
 
-  // Return the reduced nodes, and any possible warnings.
+  // Return the reduced nodes.
   return result.join('')
 
   // Get current position.
@@ -15911,7 +17686,172 @@ module.exports = {
 
 
 /***/ }),
-/* 279 */,
+/* 279 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var entities = __webpack_require__(204)
+var legacy = __webpack_require__(177)
+var hexadecimal = __webpack_require__(928)
+var decimal = __webpack_require__(926)
+var alphanumerical = __webpack_require__(542)
+var dangerous = __webpack_require__(475)
+
+module.exports = encode
+encode.escape = escape
+
+var own = {}.hasOwnProperty
+
+// Characters
+var equalsTo = 61
+
+// List of enforced escapes.
+var escapes = ['"', "'", '<', '>', '&', '`']
+
+// Map of characters to names.
+var characters = construct()
+
+// Default escapes.
+var defaultEscapes = toExpression(escapes)
+
+// Surrogate pairs.
+var surrogatePair = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g
+
+// Non-ASCII characters.
+// eslint-disable-next-line no-control-regex, unicorn/no-hex-escape
+var bmp = /[\x01-\t\x0B\f\x0E-\x1F\x7F\x81\x8D\x8F\x90\x9D\xA0-\uFFFF]/g
+
+// Encode special characters in `value`.
+function encode(value, options) {
+  var settings = options || {}
+  var subset = settings.subset
+  var set = subset ? toExpression(subset) : defaultEscapes
+  var escapeOnly = settings.escapeOnly
+  var omit = settings.omitOptionalSemicolons
+
+  value = value.replace(set, replace)
+
+  if (subset || escapeOnly) {
+    return value
+  }
+
+  return value
+    .replace(surrogatePair, replaceSurrogatePair)
+    .replace(bmp, replace)
+
+  function replaceSurrogatePair(pair, pos, slice) {
+    return toHexReference(
+      (pair.charCodeAt(0) - 0xd800) * 0x400 +
+        pair.charCodeAt(1) -
+        0xdc00 +
+        0x10000,
+      slice.charCodeAt(pos + 2),
+      omit
+    )
+  }
+
+  function replace(char, pos, slice) {
+    return one(char, slice.charCodeAt(pos + 1), settings)
+  }
+}
+
+// Shortcut to escape special characters in HTML.
+function escape(value) {
+  return encode(value, {escapeOnly: true, useNamedReferences: true})
+}
+
+// Encode `char` according to `options`.
+function one(char, next, options) {
+  var shortest = options.useShortestReferences
+  var omit = options.omitOptionalSemicolons
+  var named
+  var code
+  var numeric
+  var decimal
+
+  if ((shortest || options.useNamedReferences) && own.call(characters, char)) {
+    named = toNamed(characters[char], next, omit, options.attribute)
+  }
+
+  if (shortest || !named) {
+    code = char.charCodeAt(0)
+    numeric = toHexReference(code, next, omit)
+
+    // Use the shortest numeric reference when requested.
+    // A simple algorithm would use decimal for all code points under 100, as
+    // those are shorter than hexadecimal:
+    //
+    // * `&#99;` vs `&#x63;` (decimal shorter)
+    // * `&#100;` vs `&#x64;` (equal)
+    //
+    // However, because we take `next` into consideration when `omit` is used,
+    // And it would be possible that decimals are shorter on bigger values as
+    // well if `next` is hexadecimal but not decimal, we instead compare both.
+    if (shortest) {
+      decimal = toDecimalReference(code, next, omit)
+
+      if (decimal.length < numeric.length) {
+        numeric = decimal
+      }
+    }
+  }
+
+  if (named && (!shortest || named.length < numeric.length)) {
+    return named
+  }
+
+  return numeric
+}
+
+// Transform `code` into an entity.
+function toNamed(name, next, omit, attribute) {
+  var value = '&' + name
+
+  if (
+    omit &&
+    own.call(legacy, name) &&
+    dangerous.indexOf(name) === -1 &&
+    (!attribute || (next && next !== equalsTo && !alphanumerical(next)))
+  ) {
+    return value
+  }
+
+  return value + ';'
+}
+
+// Transform `code` into a hexadecimal character reference.
+function toHexReference(code, next, omit) {
+  var value = '&#x' + code.toString(16).toUpperCase()
+  return omit && next && !hexadecimal(next) ? value : value + ';'
+}
+
+// Transform `code` into a decimal character reference.
+function toDecimalReference(code, next, omit) {
+  var value = '&#' + String(code)
+  return omit && next && !decimal(next) ? value : value + ';'
+}
+
+// Create an expression for `characters`.
+function toExpression(characters) {
+  return new RegExp('[' + characters.join('') + ']', 'g')
+}
+
+// Construct the map.
+function construct() {
+  var chars = {}
+  var name
+
+  for (name in entities) {
+    chars[entities[name]] = name
+  }
+
+  return chars
+}
+
+
+/***/ }),
 /* 280 */
 /***/ (function(module, exports) {
 
@@ -17893,7 +19833,78 @@ module.exports = mkdirs
 
 
 /***/ }),
-/* 290 */,
+/* 290 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+// Copied and modified from remark-stringify
+// Original source: https://github.com/remarkjs/remark/blob/19a27c30b13baa3a9e864e528c6a0b901a5fc918/packages/remark-stringify/lib/visitors/link.js
+// License (MIT): https://github.com/remarkjs/remark/blob/main/license
+
+var uri = __webpack_require__(188)
+var title = __webpack_require__(96)
+
+module.exports = link
+
+var space = ' '
+var leftSquareBracket = '['
+var rightSquareBracket = ']'
+var leftParenthesis = '('
+var rightParenthesis = ')'
+
+// Expression for a protocol:
+// See <https://en.wikipedia.org/wiki/Uniform_Resource_Identifier#Generic_syntax>.
+var protocol = /^[a-z][a-z+.-]+:\/?/i
+
+// Stringify a link.
+//
+// With MDX we don't support <https://mdxjs.com> style links, which is the default
+// for remark-stringify (understandably). So, we check for the case where the url
+// and its text are equal. If it is, we serialize/stringify link syntax with the
+// url as the title rather than wrapping it in angle brackets (<>).
+//
+// ```markdown
+// [http://example.com](http://example.com)
+// ```
+//
+// Otherwise, is smart about enclosing `url` (see `encloseURI()`) and `title`
+// (see `encloseTitle()`).
+// ```
+//
+// ```markdown
+// [foo](<foo at bar dot com> 'An "example" e-mail')
+// ```
+//
+// Supports named entities in the `url` and `title` when in `settings.encode`
+// mode.
+function link(node) {
+  var self = this
+  var content = self.encode(node.url || '', node)
+  var exit = self.enterLink()
+  var value = self.all(node).join('')
+
+  exit()
+
+  content = uri(content)
+
+  if (node.title) {
+    content += space + title(self.encode(self.escape(node.title, node), node))
+  }
+
+  return (
+    leftSquareBracket +
+    value +
+    rightSquareBracket +
+    leftParenthesis +
+    content +
+    rightParenthesis
+  )
+}
+
+
+/***/ }),
 /* 291 */,
 /* 292 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -17923,7 +19934,7 @@ function decodeEntity(characters) {
 
 
 var repeat = __webpack_require__(8)
-var vfileLocation = __webpack_require__(684)
+var vfileLocation = __webpack_require__(119)
 var position = __webpack_require__(960)
 var toString = __webpack_require__(419)
 
@@ -18461,7 +20472,64 @@ exports.paginateRest = paginateRest;
 /* 302 */,
 /* 303 */,
 /* 304 */,
-/* 305 */,
+/* 305 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var decimal = __webpack_require__(926)
+var alphabetical = __webpack_require__(341)
+
+var plusSign = 43 // '+'
+var dash = 45 // '-'
+var dot = 46 // '.'
+var underscore = 95 // '_'
+
+module.exports = locate
+
+// See: <https://github.github.com/gfm/#extended-email-autolink>
+function locate(value, fromIndex) {
+  var self = this
+  var at
+  var position
+
+  if (!this.options.gfm) {
+    return -1
+  }
+
+  at = value.indexOf('@', fromIndex)
+
+  if (at === -1) {
+    return -1
+  }
+
+  position = at
+
+  if (position === fromIndex || !isGfmAtext(value.charCodeAt(position - 1))) {
+    return locate.call(self, value, at + 1)
+  }
+
+  while (position > fromIndex && isGfmAtext(value.charCodeAt(position - 1))) {
+    position--
+  }
+
+  return position
+}
+
+function isGfmAtext(code) {
+  return (
+    decimal(code) ||
+    alphabetical(code) ||
+    code === plusSign ||
+    code === dash ||
+    code === dot ||
+    code === underscore
+  )
+}
+
+
+/***/ }),
 /* 306 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
 
@@ -18956,6 +21024,10 @@ exports.getNodeSourceCodeLocation = function(node) {
     return node.sourceCodeLocation;
 };
 
+exports.updateNodeSourceCodeLocation = function(node, endLocation) {
+    node.sourceCodeLocation = Object.assign(node.sourceCodeLocation, endLocation);
+};
+
 
 /***/ }),
 /* 313 */,
@@ -19017,7 +21089,17 @@ function locate(value, fromIndex) {
 
 /***/ }),
 /* 317 */,
-/* 318 */,
+/* 318 */
+/***/ (function(module) {
+
+"use strict";
+
+
+//NOTE: this file contains auto-generated array mapped radix tree that is used for the named entity references consumption
+//(details: https://github.com/inikulin/parse5/tree/master/scripts/generate-named-entity-data/README.md)
+module.exports = new Uint16Array([4,52,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,106,303,412,810,1432,1701,1796,1987,2114,2360,2420,2484,3170,3251,4140,4393,4575,4610,5106,5512,5728,6117,6274,6315,6345,6427,6516,7002,7910,8733,9323,9870,10170,10631,10893,11318,11386,11467,12773,13092,14474,14922,15448,15542,16419,17666,18166,18611,19004,19095,19298,19397,4,16,69,77,97,98,99,102,103,108,109,110,111,112,114,115,116,117,140,150,158,169,176,194,199,210,216,222,226,242,256,266,283,294,108,105,103,5,198,1,59,148,1,198,80,5,38,1,59,156,1,38,99,117,116,101,5,193,1,59,167,1,193,114,101,118,101,59,1,258,4,2,105,121,182,191,114,99,5,194,1,59,189,1,194,59,1,1040,114,59,3,55349,56580,114,97,118,101,5,192,1,59,208,1,192,112,104,97,59,1,913,97,99,114,59,1,256,100,59,1,10835,4,2,103,112,232,237,111,110,59,1,260,102,59,3,55349,56632,112,108,121,70,117,110,99,116,105,111,110,59,1,8289,105,110,103,5,197,1,59,264,1,197,4,2,99,115,272,277,114,59,3,55349,56476,105,103,110,59,1,8788,105,108,100,101,5,195,1,59,292,1,195,109,108,5,196,1,59,301,1,196,4,8,97,99,101,102,111,114,115,117,321,350,354,383,388,394,400,405,4,2,99,114,327,336,107,115,108,97,115,104,59,1,8726,4,2,118,119,342,345,59,1,10983,101,100,59,1,8966,121,59,1,1041,4,3,99,114,116,362,369,379,97,117,115,101,59,1,8757,110,111,117,108,108,105,115,59,1,8492,97,59,1,914,114,59,3,55349,56581,112,102,59,3,55349,56633,101,118,101,59,1,728,99,114,59,1,8492,109,112,101,113,59,1,8782,4,14,72,79,97,99,100,101,102,104,105,108,111,114,115,117,442,447,456,504,542,547,569,573,577,616,678,784,790,796,99,121,59,1,1063,80,89,5,169,1,59,454,1,169,4,3,99,112,121,464,470,497,117,116,101,59,1,262,4,2,59,105,476,478,1,8914,116,97,108,68,105,102,102,101,114,101,110,116,105,97,108,68,59,1,8517,108,101,121,115,59,1,8493,4,4,97,101,105,111,514,520,530,535,114,111,110,59,1,268,100,105,108,5,199,1,59,528,1,199,114,99,59,1,264,110,105,110,116,59,1,8752,111,116,59,1,266,4,2,100,110,553,560,105,108,108,97,59,1,184,116,101,114,68,111,116,59,1,183,114,59,1,8493,105,59,1,935,114,99,108,101,4,4,68,77,80,84,591,596,603,609,111,116,59,1,8857,105,110,117,115,59,1,8854,108,117,115,59,1,8853,105,109,101,115,59,1,8855,111,4,2,99,115,623,646,107,119,105,115,101,67,111,110,116,111,117,114,73,110,116,101,103,114,97,108,59,1,8754,101,67,117,114,108,121,4,2,68,81,658,671,111,117,98,108,101,81,117,111,116,101,59,1,8221,117,111,116,101,59,1,8217,4,4,108,110,112,117,688,701,736,753,111,110,4,2,59,101,696,698,1,8759,59,1,10868,4,3,103,105,116,709,717,722,114,117,101,110,116,59,1,8801,110,116,59,1,8751,111,117,114,73,110,116,101,103,114,97,108,59,1,8750,4,2,102,114,742,745,59,1,8450,111,100,117,99,116,59,1,8720,110,116,101,114,67,108,111,99,107,119,105,115,101,67,111,110,116,111,117,114,73,110,116,101,103,114,97,108,59,1,8755,111,115,115,59,1,10799,99,114,59,3,55349,56478,112,4,2,59,67,803,805,1,8915,97,112,59,1,8781,4,11,68,74,83,90,97,99,101,102,105,111,115,834,850,855,860,865,888,903,916,921,1011,1415,4,2,59,111,840,842,1,8517,116,114,97,104,100,59,1,10513,99,121,59,1,1026,99,121,59,1,1029,99,121,59,1,1039,4,3,103,114,115,873,879,883,103,101,114,59,1,8225,114,59,1,8609,104,118,59,1,10980,4,2,97,121,894,900,114,111,110,59,1,270,59,1,1044,108,4,2,59,116,910,912,1,8711,97,59,1,916,114,59,3,55349,56583,4,2,97,102,927,998,4,2,99,109,933,992,114,105,116,105,99,97,108,4,4,65,68,71,84,950,957,978,985,99,117,116,101,59,1,180,111,4,2,116,117,964,967,59,1,729,98,108,101,65,99,117,116,101,59,1,733,114,97,118,101,59,1,96,105,108,100,101,59,1,732,111,110,100,59,1,8900,102,101,114,101,110,116,105,97,108,68,59,1,8518,4,4,112,116,117,119,1021,1026,1048,1249,102,59,3,55349,56635,4,3,59,68,69,1034,1036,1041,1,168,111,116,59,1,8412,113,117,97,108,59,1,8784,98,108,101,4,6,67,68,76,82,85,86,1065,1082,1101,1189,1211,1236,111,110,116,111,117,114,73,110,116,101,103,114,97,108,59,1,8751,111,4,2,116,119,1089,1092,59,1,168,110,65,114,114,111,119,59,1,8659,4,2,101,111,1107,1141,102,116,4,3,65,82,84,1117,1124,1136,114,114,111,119,59,1,8656,105,103,104,116,65,114,114,111,119,59,1,8660,101,101,59,1,10980,110,103,4,2,76,82,1149,1177,101,102,116,4,2,65,82,1158,1165,114,114,111,119,59,1,10232,105,103,104,116,65,114,114,111,119,59,1,10234,105,103,104,116,65,114,114,111,119,59,1,10233,105,103,104,116,4,2,65,84,1199,1206,114,114,111,119,59,1,8658,101,101,59,1,8872,112,4,2,65,68,1218,1225,114,114,111,119,59,1,8657,111,119,110,65,114,114,111,119,59,1,8661,101,114,116,105,99,97,108,66,97,114,59,1,8741,110,4,6,65,66,76,82,84,97,1264,1292,1299,1352,1391,1408,114,114,111,119,4,3,59,66,85,1276,1278,1283,1,8595,97,114,59,1,10515,112,65,114,114,111,119,59,1,8693,114,101,118,101,59,1,785,101,102,116,4,3,82,84,86,1310,1323,1334,105,103,104,116,86,101,99,116,111,114,59,1,10576,101,101,86,101,99,116,111,114,59,1,10590,101,99,116,111,114,4,2,59,66,1345,1347,1,8637,97,114,59,1,10582,105,103,104,116,4,2,84,86,1362,1373,101,101,86,101,99,116,111,114,59,1,10591,101,99,116,111,114,4,2,59,66,1384,1386,1,8641,97,114,59,1,10583,101,101,4,2,59,65,1399,1401,1,8868,114,114,111,119,59,1,8615,114,114,111,119,59,1,8659,4,2,99,116,1421,1426,114,59,3,55349,56479,114,111,107,59,1,272,4,16,78,84,97,99,100,102,103,108,109,111,112,113,115,116,117,120,1466,1470,1478,1489,1515,1520,1525,1536,1544,1593,1609,1617,1650,1664,1668,1677,71,59,1,330,72,5,208,1,59,1476,1,208,99,117,116,101,5,201,1,59,1487,1,201,4,3,97,105,121,1497,1503,1512,114,111,110,59,1,282,114,99,5,202,1,59,1510,1,202,59,1,1069,111,116,59,1,278,114,59,3,55349,56584,114,97,118,101,5,200,1,59,1534,1,200,101,109,101,110,116,59,1,8712,4,2,97,112,1550,1555,99,114,59,1,274,116,121,4,2,83,86,1563,1576,109,97,108,108,83,113,117,97,114,101,59,1,9723,101,114,121,83,109,97,108,108,83,113,117,97,114,101,59,1,9643,4,2,103,112,1599,1604,111,110,59,1,280,102,59,3,55349,56636,115,105,108,111,110,59,1,917,117,4,2,97,105,1624,1640,108,4,2,59,84,1631,1633,1,10869,105,108,100,101,59,1,8770,108,105,98,114,105,117,109,59,1,8652,4,2,99,105,1656,1660,114,59,1,8496,109,59,1,10867,97,59,1,919,109,108,5,203,1,59,1675,1,203,4,2,105,112,1683,1689,115,116,115,59,1,8707,111,110,101,110,116,105,97,108,69,59,1,8519,4,5,99,102,105,111,115,1713,1717,1722,1762,1791,121,59,1,1060,114,59,3,55349,56585,108,108,101,100,4,2,83,86,1732,1745,109,97,108,108,83,113,117,97,114,101,59,1,9724,101,114,121,83,109,97,108,108,83,113,117,97,114,101,59,1,9642,4,3,112,114,117,1770,1775,1781,102,59,3,55349,56637,65,108,108,59,1,8704,114,105,101,114,116,114,102,59,1,8497,99,114,59,1,8497,4,12,74,84,97,98,99,100,102,103,111,114,115,116,1822,1827,1834,1848,1855,1877,1882,1887,1890,1896,1978,1984,99,121,59,1,1027,5,62,1,59,1832,1,62,109,109,97,4,2,59,100,1843,1845,1,915,59,1,988,114,101,118,101,59,1,286,4,3,101,105,121,1863,1869,1874,100,105,108,59,1,290,114,99,59,1,284,59,1,1043,111,116,59,1,288,114,59,3,55349,56586,59,1,8921,112,102,59,3,55349,56638,101,97,116,101,114,4,6,69,70,71,76,83,84,1915,1933,1944,1953,1959,1971,113,117,97,108,4,2,59,76,1925,1927,1,8805,101,115,115,59,1,8923,117,108,108,69,113,117,97,108,59,1,8807,114,101,97,116,101,114,59,1,10914,101,115,115,59,1,8823,108,97,110,116,69,113,117,97,108,59,1,10878,105,108,100,101,59,1,8819,99,114,59,3,55349,56482,59,1,8811,4,8,65,97,99,102,105,111,115,117,2005,2012,2026,2032,2036,2049,2073,2089,82,68,99,121,59,1,1066,4,2,99,116,2018,2023,101,107,59,1,711,59,1,94,105,114,99,59,1,292,114,59,1,8460,108,98,101,114,116,83,112,97,99,101,59,1,8459,4,2,112,114,2055,2059,102,59,1,8461,105,122,111,110,116,97,108,76,105,110,101,59,1,9472,4,2,99,116,2079,2083,114,59,1,8459,114,111,107,59,1,294,109,112,4,2,68,69,2097,2107,111,119,110,72,117,109,112,59,1,8782,113,117,97,108,59,1,8783,4,14,69,74,79,97,99,100,102,103,109,110,111,115,116,117,2144,2149,2155,2160,2171,2189,2194,2198,2209,2245,2307,2329,2334,2341,99,121,59,1,1045,108,105,103,59,1,306,99,121,59,1,1025,99,117,116,101,5,205,1,59,2169,1,205,4,2,105,121,2177,2186,114,99,5,206,1,59,2184,1,206,59,1,1048,111,116,59,1,304,114,59,1,8465,114,97,118,101,5,204,1,59,2207,1,204,4,3,59,97,112,2217,2219,2238,1,8465,4,2,99,103,2225,2229,114,59,1,298,105,110,97,114,121,73,59,1,8520,108,105,101,115,59,1,8658,4,2,116,118,2251,2281,4,2,59,101,2257,2259,1,8748,4,2,103,114,2265,2271,114,97,108,59,1,8747,115,101,99,116,105,111,110,59,1,8898,105,115,105,98,108,101,4,2,67,84,2293,2300,111,109,109,97,59,1,8291,105,109,101,115,59,1,8290,4,3,103,112,116,2315,2320,2325,111,110,59,1,302,102,59,3,55349,56640,97,59,1,921,99,114,59,1,8464,105,108,100,101,59,1,296,4,2,107,109,2347,2352,99,121,59,1,1030,108,5,207,1,59,2358,1,207,4,5,99,102,111,115,117,2372,2386,2391,2397,2414,4,2,105,121,2378,2383,114,99,59,1,308,59,1,1049,114,59,3,55349,56589,112,102,59,3,55349,56641,4,2,99,101,2403,2408,114,59,3,55349,56485,114,99,121,59,1,1032,107,99,121,59,1,1028,4,7,72,74,97,99,102,111,115,2436,2441,2446,2452,2467,2472,2478,99,121,59,1,1061,99,121,59,1,1036,112,112,97,59,1,922,4,2,101,121,2458,2464,100,105,108,59,1,310,59,1,1050,114,59,3,55349,56590,112,102,59,3,55349,56642,99,114,59,3,55349,56486,4,11,74,84,97,99,101,102,108,109,111,115,116,2508,2513,2520,2562,2585,2981,2986,3004,3011,3146,3167,99,121,59,1,1033,5,60,1,59,2518,1,60,4,5,99,109,110,112,114,2532,2538,2544,2548,2558,117,116,101,59,1,313,98,100,97,59,1,923,103,59,1,10218,108,97,99,101,116,114,102,59,1,8466,114,59,1,8606,4,3,97,101,121,2570,2576,2582,114,111,110,59,1,317,100,105,108,59,1,315,59,1,1051,4,2,102,115,2591,2907,116,4,10,65,67,68,70,82,84,85,86,97,114,2614,2663,2672,2728,2735,2760,2820,2870,2888,2895,4,2,110,114,2620,2633,103,108,101,66,114,97,99,107,101,116,59,1,10216,114,111,119,4,3,59,66,82,2644,2646,2651,1,8592,97,114,59,1,8676,105,103,104,116,65,114,114,111,119,59,1,8646,101,105,108,105,110,103,59,1,8968,111,4,2,117,119,2679,2692,98,108,101,66,114,97,99,107,101,116,59,1,10214,110,4,2,84,86,2699,2710,101,101,86,101,99,116,111,114,59,1,10593,101,99,116,111,114,4,2,59,66,2721,2723,1,8643,97,114,59,1,10585,108,111,111,114,59,1,8970,105,103,104,116,4,2,65,86,2745,2752,114,114,111,119,59,1,8596,101,99,116,111,114,59,1,10574,4,2,101,114,2766,2792,101,4,3,59,65,86,2775,2777,2784,1,8867,114,114,111,119,59,1,8612,101,99,116,111,114,59,1,10586,105,97,110,103,108,101,4,3,59,66,69,2806,2808,2813,1,8882,97,114,59,1,10703,113,117,97,108,59,1,8884,112,4,3,68,84,86,2829,2841,2852,111,119,110,86,101,99,116,111,114,59,1,10577,101,101,86,101,99,116,111,114,59,1,10592,101,99,116,111,114,4,2,59,66,2863,2865,1,8639,97,114,59,1,10584,101,99,116,111,114,4,2,59,66,2881,2883,1,8636,97,114,59,1,10578,114,114,111,119,59,1,8656,105,103,104,116,97,114,114,111,119,59,1,8660,115,4,6,69,70,71,76,83,84,2922,2936,2947,2956,2962,2974,113,117,97,108,71,114,101,97,116,101,114,59,1,8922,117,108,108,69,113,117,97,108,59,1,8806,114,101,97,116,101,114,59,1,8822,101,115,115,59,1,10913,108,97,110,116,69,113,117,97,108,59,1,10877,105,108,100,101,59,1,8818,114,59,3,55349,56591,4,2,59,101,2992,2994,1,8920,102,116,97,114,114,111,119,59,1,8666,105,100,111,116,59,1,319,4,3,110,112,119,3019,3110,3115,103,4,4,76,82,108,114,3030,3058,3070,3098,101,102,116,4,2,65,82,3039,3046,114,114,111,119,59,1,10229,105,103,104,116,65,114,114,111,119,59,1,10231,105,103,104,116,65,114,114,111,119,59,1,10230,101,102,116,4,2,97,114,3079,3086,114,114,111,119,59,1,10232,105,103,104,116,97,114,114,111,119,59,1,10234,105,103,104,116,97,114,114,111,119,59,1,10233,102,59,3,55349,56643,101,114,4,2,76,82,3123,3134,101,102,116,65,114,114,111,119,59,1,8601,105,103,104,116,65,114,114,111,119,59,1,8600,4,3,99,104,116,3154,3158,3161,114,59,1,8466,59,1,8624,114,111,107,59,1,321,59,1,8810,4,8,97,99,101,102,105,111,115,117,3188,3192,3196,3222,3227,3237,3243,3248,112,59,1,10501,121,59,1,1052,4,2,100,108,3202,3213,105,117,109,83,112,97,99,101,59,1,8287,108,105,110,116,114,102,59,1,8499,114,59,3,55349,56592,110,117,115,80,108,117,115,59,1,8723,112,102,59,3,55349,56644,99,114,59,1,8499,59,1,924,4,9,74,97,99,101,102,111,115,116,117,3271,3276,3283,3306,3422,3427,4120,4126,4137,99,121,59,1,1034,99,117,116,101,59,1,323,4,3,97,101,121,3291,3297,3303,114,111,110,59,1,327,100,105,108,59,1,325,59,1,1053,4,3,103,115,119,3314,3380,3415,97,116,105,118,101,4,3,77,84,86,3327,3340,3365,101,100,105,117,109,83,112,97,99,101,59,1,8203,104,105,4,2,99,110,3348,3357,107,83,112,97,99,101,59,1,8203,83,112,97,99,101,59,1,8203,101,114,121,84,104,105,110,83,112,97,99,101,59,1,8203,116,101,100,4,2,71,76,3389,3405,114,101,97,116,101,114,71,114,101,97,116,101,114,59,1,8811,101,115,115,76,101,115,115,59,1,8810,76,105,110,101,59,1,10,114,59,3,55349,56593,4,4,66,110,112,116,3437,3444,3460,3464,114,101,97,107,59,1,8288,66,114,101,97,107,105,110,103,83,112,97,99,101,59,1,160,102,59,1,8469,4,13,59,67,68,69,71,72,76,78,80,82,83,84,86,3492,3494,3517,3536,3578,3657,3685,3784,3823,3860,3915,4066,4107,1,10988,4,2,111,117,3500,3510,110,103,114,117,101,110,116,59,1,8802,112,67,97,112,59,1,8813,111,117,98,108,101,86,101,114,116,105,99,97,108,66,97,114,59,1,8742,4,3,108,113,120,3544,3552,3571,101,109,101,110,116,59,1,8713,117,97,108,4,2,59,84,3561,3563,1,8800,105,108,100,101,59,3,8770,824,105,115,116,115,59,1,8708,114,101,97,116,101,114,4,7,59,69,70,71,76,83,84,3600,3602,3609,3621,3631,3637,3650,1,8815,113,117,97,108,59,1,8817,117,108,108,69,113,117,97,108,59,3,8807,824,114,101,97,116,101,114,59,3,8811,824,101,115,115,59,1,8825,108,97,110,116,69,113,117,97,108,59,3,10878,824,105,108,100,101,59,1,8821,117,109,112,4,2,68,69,3666,3677,111,119,110,72,117,109,112,59,3,8782,824,113,117,97,108,59,3,8783,824,101,4,2,102,115,3692,3724,116,84,114,105,97,110,103,108,101,4,3,59,66,69,3709,3711,3717,1,8938,97,114,59,3,10703,824,113,117,97,108,59,1,8940,115,4,6,59,69,71,76,83,84,3739,3741,3748,3757,3764,3777,1,8814,113,117,97,108,59,1,8816,114,101,97,116,101,114,59,1,8824,101,115,115,59,3,8810,824,108,97,110,116,69,113,117,97,108,59,3,10877,824,105,108,100,101,59,1,8820,101,115,116,101,100,4,2,71,76,3795,3812,114,101,97,116,101,114,71,114,101,97,116,101,114,59,3,10914,824,101,115,115,76,101,115,115,59,3,10913,824,114,101,99,101,100,101,115,4,3,59,69,83,3838,3840,3848,1,8832,113,117,97,108,59,3,10927,824,108,97,110,116,69,113,117,97,108,59,1,8928,4,2,101,105,3866,3881,118,101,114,115,101,69,108,101,109,101,110,116,59,1,8716,103,104,116,84,114,105,97,110,103,108,101,4,3,59,66,69,3900,3902,3908,1,8939,97,114,59,3,10704,824,113,117,97,108,59,1,8941,4,2,113,117,3921,3973,117,97,114,101,83,117,4,2,98,112,3933,3952,115,101,116,4,2,59,69,3942,3945,3,8847,824,113,117,97,108,59,1,8930,101,114,115,101,116,4,2,59,69,3963,3966,3,8848,824,113,117,97,108,59,1,8931,4,3,98,99,112,3981,4000,4045,115,101,116,4,2,59,69,3990,3993,3,8834,8402,113,117,97,108,59,1,8840,99,101,101,100,115,4,4,59,69,83,84,4015,4017,4025,4037,1,8833,113,117,97,108,59,3,10928,824,108,97,110,116,69,113,117,97,108,59,1,8929,105,108,100,101,59,3,8831,824,101,114,115,101,116,4,2,59,69,4056,4059,3,8835,8402,113,117,97,108,59,1,8841,105,108,100,101,4,4,59,69,70,84,4080,4082,4089,4100,1,8769,113,117,97,108,59,1,8772,117,108,108,69,113,117,97,108,59,1,8775,105,108,100,101,59,1,8777,101,114,116,105,99,97,108,66,97,114,59,1,8740,99,114,59,3,55349,56489,105,108,100,101,5,209,1,59,4135,1,209,59,1,925,4,14,69,97,99,100,102,103,109,111,112,114,115,116,117,118,4170,4176,4187,4205,4212,4217,4228,4253,4259,4292,4295,4316,4337,4346,108,105,103,59,1,338,99,117,116,101,5,211,1,59,4185,1,211,4,2,105,121,4193,4202,114,99,5,212,1,59,4200,1,212,59,1,1054,98,108,97,99,59,1,336,114,59,3,55349,56594,114,97,118,101,5,210,1,59,4226,1,210,4,3,97,101,105,4236,4241,4246,99,114,59,1,332,103,97,59,1,937,99,114,111,110,59,1,927,112,102,59,3,55349,56646,101,110,67,117,114,108,121,4,2,68,81,4272,4285,111,117,98,108,101,81,117,111,116,101,59,1,8220,117,111,116,101,59,1,8216,59,1,10836,4,2,99,108,4301,4306,114,59,3,55349,56490,97,115,104,5,216,1,59,4314,1,216,105,4,2,108,109,4323,4332,100,101,5,213,1,59,4330,1,213,101,115,59,1,10807,109,108,5,214,1,59,4344,1,214,101,114,4,2,66,80,4354,4380,4,2,97,114,4360,4364,114,59,1,8254,97,99,4,2,101,107,4372,4375,59,1,9182,101,116,59,1,9140,97,114,101,110,116,104,101,115,105,115,59,1,9180,4,9,97,99,102,104,105,108,111,114,115,4413,4422,4426,4431,4435,4438,4448,4471,4561,114,116,105,97,108,68,59,1,8706,121,59,1,1055,114,59,3,55349,56595,105,59,1,934,59,1,928,117,115,77,105,110,117,115,59,1,177,4,2,105,112,4454,4467,110,99,97,114,101,112,108,97,110,101,59,1,8460,102,59,1,8473,4,4,59,101,105,111,4481,4483,4526,4531,1,10939,99,101,100,101,115,4,4,59,69,83,84,4498,4500,4507,4519,1,8826,113,117,97,108,59,1,10927,108,97,110,116,69,113,117,97,108,59,1,8828,105,108,100,101,59,1,8830,109,101,59,1,8243,4,2,100,112,4537,4543,117,99,116,59,1,8719,111,114,116,105,111,110,4,2,59,97,4555,4557,1,8759,108,59,1,8733,4,2,99,105,4567,4572,114,59,3,55349,56491,59,1,936,4,4,85,102,111,115,4585,4594,4599,4604,79,84,5,34,1,59,4592,1,34,114,59,3,55349,56596,112,102,59,1,8474,99,114,59,3,55349,56492,4,12,66,69,97,99,101,102,104,105,111,114,115,117,4636,4642,4650,4681,4704,4763,4767,4771,5047,5069,5081,5094,97,114,114,59,1,10512,71,5,174,1,59,4648,1,174,4,3,99,110,114,4658,4664,4668,117,116,101,59,1,340,103,59,1,10219,114,4,2,59,116,4675,4677,1,8608,108,59,1,10518,4,3,97,101,121,4689,4695,4701,114,111,110,59,1,344,100,105,108,59,1,342,59,1,1056,4,2,59,118,4710,4712,1,8476,101,114,115,101,4,2,69,85,4722,4748,4,2,108,113,4728,4736,101,109,101,110,116,59,1,8715,117,105,108,105,98,114,105,117,109,59,1,8651,112,69,113,117,105,108,105,98,114,105,117,109,59,1,10607,114,59,1,8476,111,59,1,929,103,104,116,4,8,65,67,68,70,84,85,86,97,4792,4840,4849,4905,4912,4972,5022,5040,4,2,110,114,4798,4811,103,108,101,66,114,97,99,107,101,116,59,1,10217,114,111,119,4,3,59,66,76,4822,4824,4829,1,8594,97,114,59,1,8677,101,102,116,65,114,114,111,119,59,1,8644,101,105,108,105,110,103,59,1,8969,111,4,2,117,119,4856,4869,98,108,101,66,114,97,99,107,101,116,59,1,10215,110,4,2,84,86,4876,4887,101,101,86,101,99,116,111,114,59,1,10589,101,99,116,111,114,4,2,59,66,4898,4900,1,8642,97,114,59,1,10581,108,111,111,114,59,1,8971,4,2,101,114,4918,4944,101,4,3,59,65,86,4927,4929,4936,1,8866,114,114,111,119,59,1,8614,101,99,116,111,114,59,1,10587,105,97,110,103,108,101,4,3,59,66,69,4958,4960,4965,1,8883,97,114,59,1,10704,113,117,97,108,59,1,8885,112,4,3,68,84,86,4981,4993,5004,111,119,110,86,101,99,116,111,114,59,1,10575,101,101,86,101,99,116,111,114,59,1,10588,101,99,116,111,114,4,2,59,66,5015,5017,1,8638,97,114,59,1,10580,101,99,116,111,114,4,2,59,66,5033,5035,1,8640,97,114,59,1,10579,114,114,111,119,59,1,8658,4,2,112,117,5053,5057,102,59,1,8477,110,100,73,109,112,108,105,101,115,59,1,10608,105,103,104,116,97,114,114,111,119,59,1,8667,4,2,99,104,5087,5091,114,59,1,8475,59,1,8625,108,101,68,101,108,97,121,101,100,59,1,10740,4,13,72,79,97,99,102,104,105,109,111,113,115,116,117,5134,5150,5157,5164,5198,5203,5259,5265,5277,5283,5374,5380,5385,4,2,67,99,5140,5146,72,99,121,59,1,1065,121,59,1,1064,70,84,99,121,59,1,1068,99,117,116,101,59,1,346,4,5,59,97,101,105,121,5176,5178,5184,5190,5195,1,10940,114,111,110,59,1,352,100,105,108,59,1,350,114,99,59,1,348,59,1,1057,114,59,3,55349,56598,111,114,116,4,4,68,76,82,85,5216,5227,5238,5250,111,119,110,65,114,114,111,119,59,1,8595,101,102,116,65,114,114,111,119,59,1,8592,105,103,104,116,65,114,114,111,119,59,1,8594,112,65,114,114,111,119,59,1,8593,103,109,97,59,1,931,97,108,108,67,105,114,99,108,101,59,1,8728,112,102,59,3,55349,56650,4,2,114,117,5289,5293,116,59,1,8730,97,114,101,4,4,59,73,83,85,5306,5308,5322,5367,1,9633,110,116,101,114,115,101,99,116,105,111,110,59,1,8851,117,4,2,98,112,5329,5347,115,101,116,4,2,59,69,5338,5340,1,8847,113,117,97,108,59,1,8849,101,114,115,101,116,4,2,59,69,5358,5360,1,8848,113,117,97,108,59,1,8850,110,105,111,110,59,1,8852,99,114,59,3,55349,56494,97,114,59,1,8902,4,4,98,99,109,112,5395,5420,5475,5478,4,2,59,115,5401,5403,1,8912,101,116,4,2,59,69,5411,5413,1,8912,113,117,97,108,59,1,8838,4,2,99,104,5426,5468,101,101,100,115,4,4,59,69,83,84,5440,5442,5449,5461,1,8827,113,117,97,108,59,1,10928,108,97,110,116,69,113,117,97,108,59,1,8829,105,108,100,101,59,1,8831,84,104,97,116,59,1,8715,59,1,8721,4,3,59,101,115,5486,5488,5507,1,8913,114,115,101,116,4,2,59,69,5498,5500,1,8835,113,117,97,108,59,1,8839,101,116,59,1,8913,4,11,72,82,83,97,99,102,104,105,111,114,115,5536,5546,5552,5567,5579,5602,5607,5655,5695,5701,5711,79,82,78,5,222,1,59,5544,1,222,65,68,69,59,1,8482,4,2,72,99,5558,5563,99,121,59,1,1035,121,59,1,1062,4,2,98,117,5573,5576,59,1,9,59,1,932,4,3,97,101,121,5587,5593,5599,114,111,110,59,1,356,100,105,108,59,1,354,59,1,1058,114,59,3,55349,56599,4,2,101,105,5613,5631,4,2,114,116,5619,5627,101,102,111,114,101,59,1,8756,97,59,1,920,4,2,99,110,5637,5647,107,83,112,97,99,101,59,3,8287,8202,83,112,97,99,101,59,1,8201,108,100,101,4,4,59,69,70,84,5668,5670,5677,5688,1,8764,113,117,97,108,59,1,8771,117,108,108,69,113,117,97,108,59,1,8773,105,108,100,101,59,1,8776,112,102,59,3,55349,56651,105,112,108,101,68,111,116,59,1,8411,4,2,99,116,5717,5722,114,59,3,55349,56495,114,111,107,59,1,358,4,14,97,98,99,100,102,103,109,110,111,112,114,115,116,117,5758,5789,5805,5823,5830,5835,5846,5852,5921,5937,6089,6095,6101,6108,4,2,99,114,5764,5774,117,116,101,5,218,1,59,5772,1,218,114,4,2,59,111,5781,5783,1,8607,99,105,114,59,1,10569,114,4,2,99,101,5796,5800,121,59,1,1038,118,101,59,1,364,4,2,105,121,5811,5820,114,99,5,219,1,59,5818,1,219,59,1,1059,98,108,97,99,59,1,368,114,59,3,55349,56600,114,97,118,101,5,217,1,59,5844,1,217,97,99,114,59,1,362,4,2,100,105,5858,5905,101,114,4,2,66,80,5866,5892,4,2,97,114,5872,5876,114,59,1,95,97,99,4,2,101,107,5884,5887,59,1,9183,101,116,59,1,9141,97,114,101,110,116,104,101,115,105,115,59,1,9181,111,110,4,2,59,80,5913,5915,1,8899,108,117,115,59,1,8846,4,2,103,112,5927,5932,111,110,59,1,370,102,59,3,55349,56652,4,8,65,68,69,84,97,100,112,115,5955,5985,5996,6009,6026,6033,6044,6075,114,114,111,119,4,3,59,66,68,5967,5969,5974,1,8593,97,114,59,1,10514,111,119,110,65,114,114,111,119,59,1,8645,111,119,110,65,114,114,111,119,59,1,8597,113,117,105,108,105,98,114,105,117,109,59,1,10606,101,101,4,2,59,65,6017,6019,1,8869,114,114,111,119,59,1,8613,114,114,111,119,59,1,8657,111,119,110,97,114,114,111,119,59,1,8661,101,114,4,2,76,82,6052,6063,101,102,116,65,114,114,111,119,59,1,8598,105,103,104,116,65,114,114,111,119,59,1,8599,105,4,2,59,108,6082,6084,1,978,111,110,59,1,933,105,110,103,59,1,366,99,114,59,3,55349,56496,105,108,100,101,59,1,360,109,108,5,220,1,59,6115,1,220,4,9,68,98,99,100,101,102,111,115,118,6137,6143,6148,6152,6166,6250,6255,6261,6267,97,115,104,59,1,8875,97,114,59,1,10987,121,59,1,1042,97,115,104,4,2,59,108,6161,6163,1,8873,59,1,10982,4,2,101,114,6172,6175,59,1,8897,4,3,98,116,121,6183,6188,6238,97,114,59,1,8214,4,2,59,105,6194,6196,1,8214,99,97,108,4,4,66,76,83,84,6209,6214,6220,6231,97,114,59,1,8739,105,110,101,59,1,124,101,112,97,114,97,116,111,114,59,1,10072,105,108,100,101,59,1,8768,84,104,105,110,83,112,97,99,101,59,1,8202,114,59,3,55349,56601,112,102,59,3,55349,56653,99,114,59,3,55349,56497,100,97,115,104,59,1,8874,4,5,99,101,102,111,115,6286,6292,6298,6303,6309,105,114,99,59,1,372,100,103,101,59,1,8896,114,59,3,55349,56602,112,102,59,3,55349,56654,99,114,59,3,55349,56498,4,4,102,105,111,115,6325,6330,6333,6339,114,59,3,55349,56603,59,1,926,112,102,59,3,55349,56655,99,114,59,3,55349,56499,4,9,65,73,85,97,99,102,111,115,117,6365,6370,6375,6380,6391,6405,6410,6416,6422,99,121,59,1,1071,99,121,59,1,1031,99,121,59,1,1070,99,117,116,101,5,221,1,59,6389,1,221,4,2,105,121,6397,6402,114,99,59,1,374,59,1,1067,114,59,3,55349,56604,112,102,59,3,55349,56656,99,114,59,3,55349,56500,109,108,59,1,376,4,8,72,97,99,100,101,102,111,115,6445,6450,6457,6472,6477,6501,6505,6510,99,121,59,1,1046,99,117,116,101,59,1,377,4,2,97,121,6463,6469,114,111,110,59,1,381,59,1,1047,111,116,59,1,379,4,2,114,116,6483,6497,111,87,105,100,116,104,83,112,97,99,101,59,1,8203,97,59,1,918,114,59,1,8488,112,102,59,1,8484,99,114,59,3,55349,56501,4,16,97,98,99,101,102,103,108,109,110,111,112,114,115,116,117,119,6550,6561,6568,6612,6622,6634,6645,6672,6699,6854,6870,6923,6933,6963,6974,6983,99,117,116,101,5,225,1,59,6559,1,225,114,101,118,101,59,1,259,4,6,59,69,100,105,117,121,6582,6584,6588,6591,6600,6609,1,8766,59,3,8766,819,59,1,8767,114,99,5,226,1,59,6598,1,226,116,101,5,180,1,59,6607,1,180,59,1,1072,108,105,103,5,230,1,59,6620,1,230,4,2,59,114,6628,6630,1,8289,59,3,55349,56606,114,97,118,101,5,224,1,59,6643,1,224,4,2,101,112,6651,6667,4,2,102,112,6657,6663,115,121,109,59,1,8501,104,59,1,8501,104,97,59,1,945,4,2,97,112,6678,6692,4,2,99,108,6684,6688,114,59,1,257,103,59,1,10815,5,38,1,59,6697,1,38,4,2,100,103,6705,6737,4,5,59,97,100,115,118,6717,6719,6724,6727,6734,1,8743,110,100,59,1,10837,59,1,10844,108,111,112,101,59,1,10840,59,1,10842,4,7,59,101,108,109,114,115,122,6753,6755,6758,6762,6814,6835,6848,1,8736,59,1,10660,101,59,1,8736,115,100,4,2,59,97,6770,6772,1,8737,4,8,97,98,99,100,101,102,103,104,6790,6793,6796,6799,6802,6805,6808,6811,59,1,10664,59,1,10665,59,1,10666,59,1,10667,59,1,10668,59,1,10669,59,1,10670,59,1,10671,116,4,2,59,118,6821,6823,1,8735,98,4,2,59,100,6830,6832,1,8894,59,1,10653,4,2,112,116,6841,6845,104,59,1,8738,59,1,197,97,114,114,59,1,9084,4,2,103,112,6860,6865,111,110,59,1,261,102,59,3,55349,56658,4,7,59,69,97,101,105,111,112,6886,6888,6891,6897,6900,6904,6908,1,8776,59,1,10864,99,105,114,59,1,10863,59,1,8778,100,59,1,8779,115,59,1,39,114,111,120,4,2,59,101,6917,6919,1,8776,113,59,1,8778,105,110,103,5,229,1,59,6931,1,229,4,3,99,116,121,6941,6946,6949,114,59,3,55349,56502,59,1,42,109,112,4,2,59,101,6957,6959,1,8776,113,59,1,8781,105,108,100,101,5,227,1,59,6972,1,227,109,108,5,228,1,59,6981,1,228,4,2,99,105,6989,6997,111,110,105,110,116,59,1,8755,110,116,59,1,10769,4,16,78,97,98,99,100,101,102,105,107,108,110,111,112,114,115,117,7036,7041,7119,7135,7149,7155,7219,7224,7347,7354,7463,7489,7786,7793,7814,7866,111,116,59,1,10989,4,2,99,114,7047,7094,107,4,4,99,101,112,115,7058,7064,7073,7080,111,110,103,59,1,8780,112,115,105,108,111,110,59,1,1014,114,105,109,101,59,1,8245,105,109,4,2,59,101,7088,7090,1,8765,113,59,1,8909,4,2,118,119,7100,7105,101,101,59,1,8893,101,100,4,2,59,103,7113,7115,1,8965,101,59,1,8965,114,107,4,2,59,116,7127,7129,1,9141,98,114,107,59,1,9142,4,2,111,121,7141,7146,110,103,59,1,8780,59,1,1073,113,117,111,59,1,8222,4,5,99,109,112,114,116,7167,7181,7188,7193,7199,97,117,115,4,2,59,101,7176,7178,1,8757,59,1,8757,112,116,121,118,59,1,10672,115,105,59,1,1014,110,111,117,59,1,8492,4,3,97,104,119,7207,7210,7213,59,1,946,59,1,8502,101,101,110,59,1,8812,114,59,3,55349,56607,103,4,7,99,111,115,116,117,118,119,7241,7262,7288,7305,7328,7335,7340,4,3,97,105,117,7249,7253,7258,112,59,1,8898,114,99,59,1,9711,112,59,1,8899,4,3,100,112,116,7270,7275,7281,111,116,59,1,10752,108,117,115,59,1,10753,105,109,101,115,59,1,10754,4,2,113,116,7294,7300,99,117,112,59,1,10758,97,114,59,1,9733,114,105,97,110,103,108,101,4,2,100,117,7318,7324,111,119,110,59,1,9661,112,59,1,9651,112,108,117,115,59,1,10756,101,101,59,1,8897,101,100,103,101,59,1,8896,97,114,111,119,59,1,10509,4,3,97,107,111,7362,7436,7458,4,2,99,110,7368,7432,107,4,3,108,115,116,7377,7386,7394,111,122,101,110,103,101,59,1,10731,113,117,97,114,101,59,1,9642,114,105,97,110,103,108,101,4,4,59,100,108,114,7411,7413,7419,7425,1,9652,111,119,110,59,1,9662,101,102,116,59,1,9666,105,103,104,116,59,1,9656,107,59,1,9251,4,2,49,51,7442,7454,4,2,50,52,7448,7451,59,1,9618,59,1,9617,52,59,1,9619,99,107,59,1,9608,4,2,101,111,7469,7485,4,2,59,113,7475,7478,3,61,8421,117,105,118,59,3,8801,8421,116,59,1,8976,4,4,112,116,119,120,7499,7504,7517,7523,102,59,3,55349,56659,4,2,59,116,7510,7512,1,8869,111,109,59,1,8869,116,105,101,59,1,8904,4,12,68,72,85,86,98,100,104,109,112,116,117,118,7549,7571,7597,7619,7655,7660,7682,7708,7715,7721,7728,7750,4,4,76,82,108,114,7559,7562,7565,7568,59,1,9559,59,1,9556,59,1,9558,59,1,9555,4,5,59,68,85,100,117,7583,7585,7588,7591,7594,1,9552,59,1,9574,59,1,9577,59,1,9572,59,1,9575,4,4,76,82,108,114,7607,7610,7613,7616,59,1,9565,59,1,9562,59,1,9564,59,1,9561,4,7,59,72,76,82,104,108,114,7635,7637,7640,7643,7646,7649,7652,1,9553,59,1,9580,59,1,9571,59,1,9568,59,1,9579,59,1,9570,59,1,9567,111,120,59,1,10697,4,4,76,82,108,114,7670,7673,7676,7679,59,1,9557,59,1,9554,59,1,9488,59,1,9484,4,5,59,68,85,100,117,7694,7696,7699,7702,7705,1,9472,59,1,9573,59,1,9576,59,1,9516,59,1,9524,105,110,117,115,59,1,8863,108,117,115,59,1,8862,105,109,101,115,59,1,8864,4,4,76,82,108,114,7738,7741,7744,7747,59,1,9563,59,1,9560,59,1,9496,59,1,9492,4,7,59,72,76,82,104,108,114,7766,7768,7771,7774,7777,7780,7783,1,9474,59,1,9578,59,1,9569,59,1,9566,59,1,9532,59,1,9508,59,1,9500,114,105,109,101,59,1,8245,4,2,101,118,7799,7804,118,101,59,1,728,98,97,114,5,166,1,59,7812,1,166,4,4,99,101,105,111,7824,7829,7834,7846,114,59,3,55349,56503,109,105,59,1,8271,109,4,2,59,101,7841,7843,1,8765,59,1,8909,108,4,3,59,98,104,7855,7857,7860,1,92,59,1,10693,115,117,98,59,1,10184,4,2,108,109,7872,7885,108,4,2,59,101,7879,7881,1,8226,116,59,1,8226,112,4,3,59,69,101,7894,7896,7899,1,8782,59,1,10926,4,2,59,113,7905,7907,1,8783,59,1,8783,4,15,97,99,100,101,102,104,105,108,111,114,115,116,117,119,121,7942,8021,8075,8080,8121,8126,8157,8279,8295,8430,8446,8485,8491,8707,8726,4,3,99,112,114,7950,7956,8007,117,116,101,59,1,263,4,6,59,97,98,99,100,115,7970,7972,7977,7984,7998,8003,1,8745,110,100,59,1,10820,114,99,117,112,59,1,10825,4,2,97,117,7990,7994,112,59,1,10827,112,59,1,10823,111,116,59,1,10816,59,3,8745,65024,4,2,101,111,8013,8017,116,59,1,8257,110,59,1,711,4,4,97,101,105,117,8031,8046,8056,8061,4,2,112,114,8037,8041,115,59,1,10829,111,110,59,1,269,100,105,108,5,231,1,59,8054,1,231,114,99,59,1,265,112,115,4,2,59,115,8069,8071,1,10828,109,59,1,10832,111,116,59,1,267,4,3,100,109,110,8088,8097,8104,105,108,5,184,1,59,8095,1,184,112,116,121,118,59,1,10674,116,5,162,2,59,101,8112,8114,1,162,114,100,111,116,59,1,183,114,59,3,55349,56608,4,3,99,101,105,8134,8138,8154,121,59,1,1095,99,107,4,2,59,109,8146,8148,1,10003,97,114,107,59,1,10003,59,1,967,114,4,7,59,69,99,101,102,109,115,8174,8176,8179,8258,8261,8268,8273,1,9675,59,1,10691,4,3,59,101,108,8187,8189,8193,1,710,113,59,1,8791,101,4,2,97,100,8200,8223,114,114,111,119,4,2,108,114,8210,8216,101,102,116,59,1,8634,105,103,104,116,59,1,8635,4,5,82,83,97,99,100,8235,8238,8241,8246,8252,59,1,174,59,1,9416,115,116,59,1,8859,105,114,99,59,1,8858,97,115,104,59,1,8861,59,1,8791,110,105,110,116,59,1,10768,105,100,59,1,10991,99,105,114,59,1,10690,117,98,115,4,2,59,117,8288,8290,1,9827,105,116,59,1,9827,4,4,108,109,110,112,8305,8326,8376,8400,111,110,4,2,59,101,8313,8315,1,58,4,2,59,113,8321,8323,1,8788,59,1,8788,4,2,109,112,8332,8344,97,4,2,59,116,8339,8341,1,44,59,1,64,4,3,59,102,108,8352,8354,8358,1,8705,110,59,1,8728,101,4,2,109,120,8365,8371,101,110,116,59,1,8705,101,115,59,1,8450,4,2,103,105,8382,8395,4,2,59,100,8388,8390,1,8773,111,116,59,1,10861,110,116,59,1,8750,4,3,102,114,121,8408,8412,8417,59,3,55349,56660,111,100,59,1,8720,5,169,2,59,115,8424,8426,1,169,114,59,1,8471,4,2,97,111,8436,8441,114,114,59,1,8629,115,115,59,1,10007,4,2,99,117,8452,8457,114,59,3,55349,56504,4,2,98,112,8463,8474,4,2,59,101,8469,8471,1,10959,59,1,10961,4,2,59,101,8480,8482,1,10960,59,1,10962,100,111,116,59,1,8943,4,7,100,101,108,112,114,118,119,8507,8522,8536,8550,8600,8697,8702,97,114,114,4,2,108,114,8516,8519,59,1,10552,59,1,10549,4,2,112,115,8528,8532,114,59,1,8926,99,59,1,8927,97,114,114,4,2,59,112,8545,8547,1,8630,59,1,10557,4,6,59,98,99,100,111,115,8564,8566,8573,8587,8592,8596,1,8746,114,99,97,112,59,1,10824,4,2,97,117,8579,8583,112,59,1,10822,112,59,1,10826,111,116,59,1,8845,114,59,1,10821,59,3,8746,65024,4,4,97,108,114,118,8610,8623,8663,8672,114,114,4,2,59,109,8618,8620,1,8631,59,1,10556,121,4,3,101,118,119,8632,8651,8656,113,4,2,112,115,8639,8645,114,101,99,59,1,8926,117,99,99,59,1,8927,101,101,59,1,8910,101,100,103,101,59,1,8911,101,110,5,164,1,59,8670,1,164,101,97,114,114,111,119,4,2,108,114,8684,8690,101,102,116,59,1,8630,105,103,104,116,59,1,8631,101,101,59,1,8910,101,100,59,1,8911,4,2,99,105,8713,8721,111,110,105,110,116,59,1,8754,110,116,59,1,8753,108,99,116,121,59,1,9005,4,19,65,72,97,98,99,100,101,102,104,105,106,108,111,114,115,116,117,119,122,8773,8778,8783,8821,8839,8854,8887,8914,8930,8944,9036,9041,9058,9197,9227,9258,9281,9297,9305,114,114,59,1,8659,97,114,59,1,10597,4,4,103,108,114,115,8793,8799,8805,8809,103,101,114,59,1,8224,101,116,104,59,1,8504,114,59,1,8595,104,4,2,59,118,8816,8818,1,8208,59,1,8867,4,2,107,108,8827,8834,97,114,111,119,59,1,10511,97,99,59,1,733,4,2,97,121,8845,8851,114,111,110,59,1,271,59,1,1076,4,3,59,97,111,8862,8864,8880,1,8518,4,2,103,114,8870,8876,103,101,114,59,1,8225,114,59,1,8650,116,115,101,113,59,1,10871,4,3,103,108,109,8895,8902,8907,5,176,1,59,8900,1,176,116,97,59,1,948,112,116,121,118,59,1,10673,4,2,105,114,8920,8926,115,104,116,59,1,10623,59,3,55349,56609,97,114,4,2,108,114,8938,8941,59,1,8643,59,1,8642,4,5,97,101,103,115,118,8956,8986,8989,8996,9001,109,4,3,59,111,115,8965,8967,8983,1,8900,110,100,4,2,59,115,8975,8977,1,8900,117,105,116,59,1,9830,59,1,9830,59,1,168,97,109,109,97,59,1,989,105,110,59,1,8946,4,3,59,105,111,9009,9011,9031,1,247,100,101,5,247,2,59,111,9020,9022,1,247,110,116,105,109,101,115,59,1,8903,110,120,59,1,8903,99,121,59,1,1106,99,4,2,111,114,9048,9053,114,110,59,1,8990,111,112,59,1,8973,4,5,108,112,116,117,119,9070,9076,9081,9130,9144,108,97,114,59,1,36,102,59,3,55349,56661,4,5,59,101,109,112,115,9093,9095,9109,9116,9122,1,729,113,4,2,59,100,9102,9104,1,8784,111,116,59,1,8785,105,110,117,115,59,1,8760,108,117,115,59,1,8724,113,117,97,114,101,59,1,8865,98,108,101,98,97,114,119,101,100,103,101,59,1,8966,110,4,3,97,100,104,9153,9160,9172,114,114,111,119,59,1,8595,111,119,110,97,114,114,111,119,115,59,1,8650,97,114,112,111,111,110,4,2,108,114,9184,9190,101,102,116,59,1,8643,105,103,104,116,59,1,8642,4,2,98,99,9203,9211,107,97,114,111,119,59,1,10512,4,2,111,114,9217,9222,114,110,59,1,8991,111,112,59,1,8972,4,3,99,111,116,9235,9248,9252,4,2,114,121,9241,9245,59,3,55349,56505,59,1,1109,108,59,1,10742,114,111,107,59,1,273,4,2,100,114,9264,9269,111,116,59,1,8945,105,4,2,59,102,9276,9278,1,9663,59,1,9662,4,2,97,104,9287,9292,114,114,59,1,8693,97,114,59,1,10607,97,110,103,108,101,59,1,10662,4,2,99,105,9311,9315,121,59,1,1119,103,114,97,114,114,59,1,10239,4,18,68,97,99,100,101,102,103,108,109,110,111,112,113,114,115,116,117,120,9361,9376,9398,9439,9444,9447,9462,9495,9531,9585,9598,9614,9659,9755,9771,9792,9808,9826,4,2,68,111,9367,9372,111,116,59,1,10871,116,59,1,8785,4,2,99,115,9382,9392,117,116,101,5,233,1,59,9390,1,233,116,101,114,59,1,10862,4,4,97,105,111,121,9408,9414,9430,9436,114,111,110,59,1,283,114,4,2,59,99,9421,9423,1,8790,5,234,1,59,9428,1,234,108,111,110,59,1,8789,59,1,1101,111,116,59,1,279,59,1,8519,4,2,68,114,9453,9458,111,116,59,1,8786,59,3,55349,56610,4,3,59,114,115,9470,9472,9482,1,10906,97,118,101,5,232,1,59,9480,1,232,4,2,59,100,9488,9490,1,10902,111,116,59,1,10904,4,4,59,105,108,115,9505,9507,9515,9518,1,10905,110,116,101,114,115,59,1,9191,59,1,8467,4,2,59,100,9524,9526,1,10901,111,116,59,1,10903,4,3,97,112,115,9539,9544,9564,99,114,59,1,275,116,121,4,3,59,115,118,9554,9556,9561,1,8709,101,116,59,1,8709,59,1,8709,112,4,2,49,59,9571,9583,4,2,51,52,9577,9580,59,1,8196,59,1,8197,1,8195,4,2,103,115,9591,9594,59,1,331,112,59,1,8194,4,2,103,112,9604,9609,111,110,59,1,281,102,59,3,55349,56662,4,3,97,108,115,9622,9635,9640,114,4,2,59,115,9629,9631,1,8917,108,59,1,10723,117,115,59,1,10865,105,4,3,59,108,118,9649,9651,9656,1,949,111,110,59,1,949,59,1,1013,4,4,99,115,117,118,9669,9686,9716,9747,4,2,105,111,9675,9680,114,99,59,1,8790,108,111,110,59,1,8789,4,2,105,108,9692,9696,109,59,1,8770,97,110,116,4,2,103,108,9705,9710,116,114,59,1,10902,101,115,115,59,1,10901,4,3,97,101,105,9724,9729,9734,108,115,59,1,61,115,116,59,1,8799,118,4,2,59,68,9741,9743,1,8801,68,59,1,10872,112,97,114,115,108,59,1,10725,4,2,68,97,9761,9766,111,116,59,1,8787,114,114,59,1,10609,4,3,99,100,105,9779,9783,9788,114,59,1,8495,111,116,59,1,8784,109,59,1,8770,4,2,97,104,9798,9801,59,1,951,5,240,1,59,9806,1,240,4,2,109,114,9814,9822,108,5,235,1,59,9820,1,235,111,59,1,8364,4,3,99,105,112,9834,9838,9843,108,59,1,33,115,116,59,1,8707,4,2,101,111,9849,9859,99,116,97,116,105,111,110,59,1,8496,110,101,110,116,105,97,108,101,59,1,8519,4,12,97,99,101,102,105,106,108,110,111,112,114,115,9896,9910,9914,9921,9954,9960,9967,9989,9994,10027,10036,10164,108,108,105,110,103,100,111,116,115,101,113,59,1,8786,121,59,1,1092,109,97,108,101,59,1,9792,4,3,105,108,114,9929,9935,9950,108,105,103,59,1,64259,4,2,105,108,9941,9945,103,59,1,64256,105,103,59,1,64260,59,3,55349,56611,108,105,103,59,1,64257,108,105,103,59,3,102,106,4,3,97,108,116,9975,9979,9984,116,59,1,9837,105,103,59,1,64258,110,115,59,1,9649,111,102,59,1,402,4,2,112,114,10000,10005,102,59,3,55349,56663,4,2,97,107,10011,10016,108,108,59,1,8704,4,2,59,118,10022,10024,1,8916,59,1,10969,97,114,116,105,110,116,59,1,10765,4,2,97,111,10042,10159,4,2,99,115,10048,10155,4,6,49,50,51,52,53,55,10062,10102,10114,10135,10139,10151,4,6,50,51,52,53,54,56,10076,10083,10086,10093,10096,10099,5,189,1,59,10081,1,189,59,1,8531,5,188,1,59,10091,1,188,59,1,8533,59,1,8537,59,1,8539,4,2,51,53,10108,10111,59,1,8532,59,1,8534,4,3,52,53,56,10122,10129,10132,5,190,1,59,10127,1,190,59,1,8535,59,1,8540,53,59,1,8536,4,2,54,56,10145,10148,59,1,8538,59,1,8541,56,59,1,8542,108,59,1,8260,119,110,59,1,8994,99,114,59,3,55349,56507,4,17,69,97,98,99,100,101,102,103,105,106,108,110,111,114,115,116,118,10206,10217,10247,10254,10268,10273,10358,10363,10374,10380,10385,10406,10458,10464,10470,10497,10610,4,2,59,108,10212,10214,1,8807,59,1,10892,4,3,99,109,112,10225,10231,10244,117,116,101,59,1,501,109,97,4,2,59,100,10239,10241,1,947,59,1,989,59,1,10886,114,101,118,101,59,1,287,4,2,105,121,10260,10265,114,99,59,1,285,59,1,1075,111,116,59,1,289,4,4,59,108,113,115,10283,10285,10288,10308,1,8805,59,1,8923,4,3,59,113,115,10296,10298,10301,1,8805,59,1,8807,108,97,110,116,59,1,10878,4,4,59,99,100,108,10318,10320,10324,10345,1,10878,99,59,1,10921,111,116,4,2,59,111,10332,10334,1,10880,4,2,59,108,10340,10342,1,10882,59,1,10884,4,2,59,101,10351,10354,3,8923,65024,115,59,1,10900,114,59,3,55349,56612,4,2,59,103,10369,10371,1,8811,59,1,8921,109,101,108,59,1,8503,99,121,59,1,1107,4,4,59,69,97,106,10395,10397,10400,10403,1,8823,59,1,10898,59,1,10917,59,1,10916,4,4,69,97,101,115,10416,10419,10434,10453,59,1,8809,112,4,2,59,112,10426,10428,1,10890,114,111,120,59,1,10890,4,2,59,113,10440,10442,1,10888,4,2,59,113,10448,10450,1,10888,59,1,8809,105,109,59,1,8935,112,102,59,3,55349,56664,97,118,101,59,1,96,4,2,99,105,10476,10480,114,59,1,8458,109,4,3,59,101,108,10489,10491,10494,1,8819,59,1,10894,59,1,10896,5,62,6,59,99,100,108,113,114,10512,10514,10527,10532,10538,10545,1,62,4,2,99,105,10520,10523,59,1,10919,114,59,1,10874,111,116,59,1,8919,80,97,114,59,1,10645,117,101,115,116,59,1,10876,4,5,97,100,101,108,115,10557,10574,10579,10599,10605,4,2,112,114,10563,10570,112,114,111,120,59,1,10886,114,59,1,10616,111,116,59,1,8919,113,4,2,108,113,10586,10592,101,115,115,59,1,8923,108,101,115,115,59,1,10892,101,115,115,59,1,8823,105,109,59,1,8819,4,2,101,110,10616,10626,114,116,110,101,113,113,59,3,8809,65024,69,59,3,8809,65024,4,10,65,97,98,99,101,102,107,111,115,121,10653,10658,10713,10718,10724,10760,10765,10786,10850,10875,114,114,59,1,8660,4,4,105,108,109,114,10668,10674,10678,10684,114,115,112,59,1,8202,102,59,1,189,105,108,116,59,1,8459,4,2,100,114,10690,10695,99,121,59,1,1098,4,3,59,99,119,10703,10705,10710,1,8596,105,114,59,1,10568,59,1,8621,97,114,59,1,8463,105,114,99,59,1,293,4,3,97,108,114,10732,10748,10754,114,116,115,4,2,59,117,10741,10743,1,9829,105,116,59,1,9829,108,105,112,59,1,8230,99,111,110,59,1,8889,114,59,3,55349,56613,115,4,2,101,119,10772,10779,97,114,111,119,59,1,10533,97,114,111,119,59,1,10534,4,5,97,109,111,112,114,10798,10803,10809,10839,10844,114,114,59,1,8703,116,104,116,59,1,8763,107,4,2,108,114,10816,10827,101,102,116,97,114,114,111,119,59,1,8617,105,103,104,116,97,114,114,111,119,59,1,8618,102,59,3,55349,56665,98,97,114,59,1,8213,4,3,99,108,116,10858,10863,10869,114,59,3,55349,56509,97,115,104,59,1,8463,114,111,107,59,1,295,4,2,98,112,10881,10887,117,108,108,59,1,8259,104,101,110,59,1,8208,4,15,97,99,101,102,103,105,106,109,110,111,112,113,115,116,117,10925,10936,10958,10977,10990,11001,11039,11045,11101,11192,11220,11226,11237,11285,11299,99,117,116,101,5,237,1,59,10934,1,237,4,3,59,105,121,10944,10946,10955,1,8291,114,99,5,238,1,59,10953,1,238,59,1,1080,4,2,99,120,10964,10968,121,59,1,1077,99,108,5,161,1,59,10975,1,161,4,2,102,114,10983,10986,59,1,8660,59,3,55349,56614,114,97,118,101,5,236,1,59,10999,1,236,4,4,59,105,110,111,11011,11013,11028,11034,1,8520,4,2,105,110,11019,11024,110,116,59,1,10764,116,59,1,8749,102,105,110,59,1,10716,116,97,59,1,8489,108,105,103,59,1,307,4,3,97,111,112,11053,11092,11096,4,3,99,103,116,11061,11065,11088,114,59,1,299,4,3,101,108,112,11073,11076,11082,59,1,8465,105,110,101,59,1,8464,97,114,116,59,1,8465,104,59,1,305,102,59,1,8887,101,100,59,1,437,4,5,59,99,102,111,116,11113,11115,11121,11136,11142,1,8712,97,114,101,59,1,8453,105,110,4,2,59,116,11129,11131,1,8734,105,101,59,1,10717,100,111,116,59,1,305,4,5,59,99,101,108,112,11154,11156,11161,11179,11186,1,8747,97,108,59,1,8890,4,2,103,114,11167,11173,101,114,115,59,1,8484,99,97,108,59,1,8890,97,114,104,107,59,1,10775,114,111,100,59,1,10812,4,4,99,103,112,116,11202,11206,11211,11216,121,59,1,1105,111,110,59,1,303,102,59,3,55349,56666,97,59,1,953,114,111,100,59,1,10812,117,101,115,116,5,191,1,59,11235,1,191,4,2,99,105,11243,11248,114,59,3,55349,56510,110,4,5,59,69,100,115,118,11261,11263,11266,11271,11282,1,8712,59,1,8953,111,116,59,1,8949,4,2,59,118,11277,11279,1,8948,59,1,8947,59,1,8712,4,2,59,105,11291,11293,1,8290,108,100,101,59,1,297,4,2,107,109,11305,11310,99,121,59,1,1110,108,5,239,1,59,11316,1,239,4,6,99,102,109,111,115,117,11332,11346,11351,11357,11363,11380,4,2,105,121,11338,11343,114,99,59,1,309,59,1,1081,114,59,3,55349,56615,97,116,104,59,1,567,112,102,59,3,55349,56667,4,2,99,101,11369,11374,114,59,3,55349,56511,114,99,121,59,1,1112,107,99,121,59,1,1108,4,8,97,99,102,103,104,106,111,115,11404,11418,11433,11438,11445,11450,11455,11461,112,112,97,4,2,59,118,11413,11415,1,954,59,1,1008,4,2,101,121,11424,11430,100,105,108,59,1,311,59,1,1082,114,59,3,55349,56616,114,101,101,110,59,1,312,99,121,59,1,1093,99,121,59,1,1116,112,102,59,3,55349,56668,99,114,59,3,55349,56512,4,23,65,66,69,72,97,98,99,100,101,102,103,104,106,108,109,110,111,112,114,115,116,117,118,11515,11538,11544,11555,11560,11721,11780,11818,11868,12136,12160,12171,12203,12208,12246,12275,12327,12509,12523,12569,12641,12732,12752,4,3,97,114,116,11523,11528,11532,114,114,59,1,8666,114,59,1,8656,97,105,108,59,1,10523,97,114,114,59,1,10510,4,2,59,103,11550,11552,1,8806,59,1,10891,97,114,59,1,10594,4,9,99,101,103,109,110,112,113,114,116,11580,11586,11594,11600,11606,11624,11627,11636,11694,117,116,101,59,1,314,109,112,116,121,118,59,1,10676,114,97,110,59,1,8466,98,100,97,59,1,955,103,4,3,59,100,108,11615,11617,11620,1,10216,59,1,10641,101,59,1,10216,59,1,10885,117,111,5,171,1,59,11634,1,171,114,4,8,59,98,102,104,108,112,115,116,11655,11657,11669,11673,11677,11681,11685,11690,1,8592,4,2,59,102,11663,11665,1,8676,115,59,1,10527,115,59,1,10525,107,59,1,8617,112,59,1,8619,108,59,1,10553,105,109,59,1,10611,108,59,1,8610,4,3,59,97,101,11702,11704,11709,1,10923,105,108,59,1,10521,4,2,59,115,11715,11717,1,10925,59,3,10925,65024,4,3,97,98,114,11729,11734,11739,114,114,59,1,10508,114,107,59,1,10098,4,2,97,107,11745,11758,99,4,2,101,107,11752,11755,59,1,123,59,1,91,4,2,101,115,11764,11767,59,1,10635,108,4,2,100,117,11774,11777,59,1,10639,59,1,10637,4,4,97,101,117,121,11790,11796,11811,11815,114,111,110,59,1,318,4,2,100,105,11802,11807,105,108,59,1,316,108,59,1,8968,98,59,1,123,59,1,1083,4,4,99,113,114,115,11828,11832,11845,11864,97,59,1,10550,117,111,4,2,59,114,11840,11842,1,8220,59,1,8222,4,2,100,117,11851,11857,104,97,114,59,1,10599,115,104,97,114,59,1,10571,104,59,1,8626,4,5,59,102,103,113,115,11880,11882,12008,12011,12031,1,8804,116,4,5,97,104,108,114,116,11895,11913,11935,11947,11996,114,114,111,119,4,2,59,116,11905,11907,1,8592,97,105,108,59,1,8610,97,114,112,111,111,110,4,2,100,117,11925,11931,111,119,110,59,1,8637,112,59,1,8636,101,102,116,97,114,114,111,119,115,59,1,8647,105,103,104,116,4,3,97,104,115,11959,11974,11984,114,114,111,119,4,2,59,115,11969,11971,1,8596,59,1,8646,97,114,112,111,111,110,115,59,1,8651,113,117,105,103,97,114,114,111,119,59,1,8621,104,114,101,101,116,105,109,101,115,59,1,8907,59,1,8922,4,3,59,113,115,12019,12021,12024,1,8804,59,1,8806,108,97,110,116,59,1,10877,4,5,59,99,100,103,115,12043,12045,12049,12070,12083,1,10877,99,59,1,10920,111,116,4,2,59,111,12057,12059,1,10879,4,2,59,114,12065,12067,1,10881,59,1,10883,4,2,59,101,12076,12079,3,8922,65024,115,59,1,10899,4,5,97,100,101,103,115,12095,12103,12108,12126,12131,112,112,114,111,120,59,1,10885,111,116,59,1,8918,113,4,2,103,113,12115,12120,116,114,59,1,8922,103,116,114,59,1,10891,116,114,59,1,8822,105,109,59,1,8818,4,3,105,108,114,12144,12150,12156,115,104,116,59,1,10620,111,111,114,59,1,8970,59,3,55349,56617,4,2,59,69,12166,12168,1,8822,59,1,10897,4,2,97,98,12177,12198,114,4,2,100,117,12184,12187,59,1,8637,4,2,59,108,12193,12195,1,8636,59,1,10602,108,107,59,1,9604,99,121,59,1,1113,4,5,59,97,99,104,116,12220,12222,12227,12235,12241,1,8810,114,114,59,1,8647,111,114,110,101,114,59,1,8990,97,114,100,59,1,10603,114,105,59,1,9722,4,2,105,111,12252,12258,100,111,116,59,1,320,117,115,116,4,2,59,97,12267,12269,1,9136,99,104,101,59,1,9136,4,4,69,97,101,115,12285,12288,12303,12322,59,1,8808,112,4,2,59,112,12295,12297,1,10889,114,111,120,59,1,10889,4,2,59,113,12309,12311,1,10887,4,2,59,113,12317,12319,1,10887,59,1,8808,105,109,59,1,8934,4,8,97,98,110,111,112,116,119,122,12345,12359,12364,12421,12446,12467,12474,12490,4,2,110,114,12351,12355,103,59,1,10220,114,59,1,8701,114,107,59,1,10214,103,4,3,108,109,114,12373,12401,12409,101,102,116,4,2,97,114,12382,12389,114,114,111,119,59,1,10229,105,103,104,116,97,114,114,111,119,59,1,10231,97,112,115,116,111,59,1,10236,105,103,104,116,97,114,114,111,119,59,1,10230,112,97,114,114,111,119,4,2,108,114,12433,12439,101,102,116,59,1,8619,105,103,104,116,59,1,8620,4,3,97,102,108,12454,12458,12462,114,59,1,10629,59,3,55349,56669,117,115,59,1,10797,105,109,101,115,59,1,10804,4,2,97,98,12480,12485,115,116,59,1,8727,97,114,59,1,95,4,3,59,101,102,12498,12500,12506,1,9674,110,103,101,59,1,9674,59,1,10731,97,114,4,2,59,108,12517,12519,1,40,116,59,1,10643,4,5,97,99,104,109,116,12535,12540,12548,12561,12564,114,114,59,1,8646,111,114,110,101,114,59,1,8991,97,114,4,2,59,100,12556,12558,1,8651,59,1,10605,59,1,8206,114,105,59,1,8895,4,6,97,99,104,105,113,116,12583,12589,12594,12597,12614,12635,113,117,111,59,1,8249,114,59,3,55349,56513,59,1,8624,109,4,3,59,101,103,12606,12608,12611,1,8818,59,1,10893,59,1,10895,4,2,98,117,12620,12623,59,1,91,111,4,2,59,114,12630,12632,1,8216,59,1,8218,114,111,107,59,1,322,5,60,8,59,99,100,104,105,108,113,114,12660,12662,12675,12680,12686,12692,12698,12705,1,60,4,2,99,105,12668,12671,59,1,10918,114,59,1,10873,111,116,59,1,8918,114,101,101,59,1,8907,109,101,115,59,1,8905,97,114,114,59,1,10614,117,101,115,116,59,1,10875,4,2,80,105,12711,12716,97,114,59,1,10646,4,3,59,101,102,12724,12726,12729,1,9667,59,1,8884,59,1,9666,114,4,2,100,117,12739,12746,115,104,97,114,59,1,10570,104,97,114,59,1,10598,4,2,101,110,12758,12768,114,116,110,101,113,113,59,3,8808,65024,69,59,3,8808,65024,4,14,68,97,99,100,101,102,104,105,108,110,111,112,115,117,12803,12809,12893,12908,12914,12928,12933,12937,13011,13025,13032,13049,13052,13069,68,111,116,59,1,8762,4,4,99,108,112,114,12819,12827,12849,12887,114,5,175,1,59,12825,1,175,4,2,101,116,12833,12836,59,1,9794,4,2,59,101,12842,12844,1,10016,115,101,59,1,10016,4,2,59,115,12855,12857,1,8614,116,111,4,4,59,100,108,117,12869,12871,12877,12883,1,8614,111,119,110,59,1,8615,101,102,116,59,1,8612,112,59,1,8613,107,101,114,59,1,9646,4,2,111,121,12899,12905,109,109,97,59,1,10793,59,1,1084,97,115,104,59,1,8212,97,115,117,114,101,100,97,110,103,108,101,59,1,8737,114,59,3,55349,56618,111,59,1,8487,4,3,99,100,110,12945,12954,12985,114,111,5,181,1,59,12952,1,181,4,4,59,97,99,100,12964,12966,12971,12976,1,8739,115,116,59,1,42,105,114,59,1,10992,111,116,5,183,1,59,12983,1,183,117,115,4,3,59,98,100,12995,12997,13000,1,8722,59,1,8863,4,2,59,117,13006,13008,1,8760,59,1,10794,4,2,99,100,13017,13021,112,59,1,10971,114,59,1,8230,112,108,117,115,59,1,8723,4,2,100,112,13038,13044,101,108,115,59,1,8871,102,59,3,55349,56670,59,1,8723,4,2,99,116,13058,13063,114,59,3,55349,56514,112,111,115,59,1,8766,4,3,59,108,109,13077,13079,13087,1,956,116,105,109,97,112,59,1,8888,97,112,59,1,8888,4,24,71,76,82,86,97,98,99,100,101,102,103,104,105,106,108,109,111,112,114,115,116,117,118,119,13142,13165,13217,13229,13247,13330,13359,13414,13420,13508,13513,13579,13602,13626,13631,13762,13767,13855,13936,13995,14214,14285,14312,14432,4,2,103,116,13148,13152,59,3,8921,824,4,2,59,118,13158,13161,3,8811,8402,59,3,8811,824,4,3,101,108,116,13173,13200,13204,102,116,4,2,97,114,13181,13188,114,114,111,119,59,1,8653,105,103,104,116,97,114,114,111,119,59,1,8654,59,3,8920,824,4,2,59,118,13210,13213,3,8810,8402,59,3,8810,824,105,103,104,116,97,114,114,111,119,59,1,8655,4,2,68,100,13235,13241,97,115,104,59,1,8879,97,115,104,59,1,8878,4,5,98,99,110,112,116,13259,13264,13270,13275,13308,108,97,59,1,8711,117,116,101,59,1,324,103,59,3,8736,8402,4,5,59,69,105,111,112,13287,13289,13293,13298,13302,1,8777,59,3,10864,824,100,59,3,8779,824,115,59,1,329,114,111,120,59,1,8777,117,114,4,2,59,97,13316,13318,1,9838,108,4,2,59,115,13325,13327,1,9838,59,1,8469,4,2,115,117,13336,13344,112,5,160,1,59,13342,1,160,109,112,4,2,59,101,13352,13355,3,8782,824,59,3,8783,824,4,5,97,101,111,117,121,13371,13385,13391,13407,13411,4,2,112,114,13377,13380,59,1,10819,111,110,59,1,328,100,105,108,59,1,326,110,103,4,2,59,100,13399,13401,1,8775,111,116,59,3,10861,824,112,59,1,10818,59,1,1085,97,115,104,59,1,8211,4,7,59,65,97,100,113,115,120,13436,13438,13443,13466,13472,13478,13494,1,8800,114,114,59,1,8663,114,4,2,104,114,13450,13454,107,59,1,10532,4,2,59,111,13460,13462,1,8599,119,59,1,8599,111,116,59,3,8784,824,117,105,118,59,1,8802,4,2,101,105,13484,13489,97,114,59,1,10536,109,59,3,8770,824,105,115,116,4,2,59,115,13503,13505,1,8708,59,1,8708,114,59,3,55349,56619,4,4,69,101,115,116,13523,13527,13563,13568,59,3,8807,824,4,3,59,113,115,13535,13537,13559,1,8817,4,3,59,113,115,13545,13547,13551,1,8817,59,3,8807,824,108,97,110,116,59,3,10878,824,59,3,10878,824,105,109,59,1,8821,4,2,59,114,13574,13576,1,8815,59,1,8815,4,3,65,97,112,13587,13592,13597,114,114,59,1,8654,114,114,59,1,8622,97,114,59,1,10994,4,3,59,115,118,13610,13612,13623,1,8715,4,2,59,100,13618,13620,1,8956,59,1,8954,59,1,8715,99,121,59,1,1114,4,7,65,69,97,100,101,115,116,13647,13652,13656,13661,13665,13737,13742,114,114,59,1,8653,59,3,8806,824,114,114,59,1,8602,114,59,1,8229,4,4,59,102,113,115,13675,13677,13703,13725,1,8816,116,4,2,97,114,13684,13691,114,114,111,119,59,1,8602,105,103,104,116,97,114,114,111,119,59,1,8622,4,3,59,113,115,13711,13713,13717,1,8816,59,3,8806,824,108,97,110,116,59,3,10877,824,4,2,59,115,13731,13734,3,10877,824,59,1,8814,105,109,59,1,8820,4,2,59,114,13748,13750,1,8814,105,4,2,59,101,13757,13759,1,8938,59,1,8940,105,100,59,1,8740,4,2,112,116,13773,13778,102,59,3,55349,56671,5,172,3,59,105,110,13787,13789,13829,1,172,110,4,4,59,69,100,118,13800,13802,13806,13812,1,8713,59,3,8953,824,111,116,59,3,8949,824,4,3,97,98,99,13820,13823,13826,59,1,8713,59,1,8951,59,1,8950,105,4,2,59,118,13836,13838,1,8716,4,3,97,98,99,13846,13849,13852,59,1,8716,59,1,8958,59,1,8957,4,3,97,111,114,13863,13892,13899,114,4,4,59,97,115,116,13874,13876,13883,13888,1,8742,108,108,101,108,59,1,8742,108,59,3,11005,8421,59,3,8706,824,108,105,110,116,59,1,10772,4,3,59,99,101,13907,13909,13914,1,8832,117,101,59,1,8928,4,2,59,99,13920,13923,3,10927,824,4,2,59,101,13929,13931,1,8832,113,59,3,10927,824,4,4,65,97,105,116,13946,13951,13971,13982,114,114,59,1,8655,114,114,4,3,59,99,119,13961,13963,13967,1,8603,59,3,10547,824,59,3,8605,824,103,104,116,97,114,114,111,119,59,1,8603,114,105,4,2,59,101,13990,13992,1,8939,59,1,8941,4,7,99,104,105,109,112,113,117,14011,14036,14060,14080,14085,14090,14106,4,4,59,99,101,114,14021,14023,14028,14032,1,8833,117,101,59,1,8929,59,3,10928,824,59,3,55349,56515,111,114,116,4,2,109,112,14045,14050,105,100,59,1,8740,97,114,97,108,108,101,108,59,1,8742,109,4,2,59,101,14067,14069,1,8769,4,2,59,113,14075,14077,1,8772,59,1,8772,105,100,59,1,8740,97,114,59,1,8742,115,117,4,2,98,112,14098,14102,101,59,1,8930,101,59,1,8931,4,3,98,99,112,14114,14157,14171,4,4,59,69,101,115,14124,14126,14130,14133,1,8836,59,3,10949,824,59,1,8840,101,116,4,2,59,101,14141,14144,3,8834,8402,113,4,2,59,113,14151,14153,1,8840,59,3,10949,824,99,4,2,59,101,14164,14166,1,8833,113,59,3,10928,824,4,4,59,69,101,115,14181,14183,14187,14190,1,8837,59,3,10950,824,59,1,8841,101,116,4,2,59,101,14198,14201,3,8835,8402,113,4,2,59,113,14208,14210,1,8841,59,3,10950,824,4,4,103,105,108,114,14224,14228,14238,14242,108,59,1,8825,108,100,101,5,241,1,59,14236,1,241,103,59,1,8824,105,97,110,103,108,101,4,2,108,114,14254,14269,101,102,116,4,2,59,101,14263,14265,1,8938,113,59,1,8940,105,103,104,116,4,2,59,101,14279,14281,1,8939,113,59,1,8941,4,2,59,109,14291,14293,1,957,4,3,59,101,115,14301,14303,14308,1,35,114,111,59,1,8470,112,59,1,8199,4,9,68,72,97,100,103,105,108,114,115,14332,14338,14344,14349,14355,14369,14376,14408,14426,97,115,104,59,1,8877,97,114,114,59,1,10500,112,59,3,8781,8402,97,115,104,59,1,8876,4,2,101,116,14361,14365,59,3,8805,8402,59,3,62,8402,110,102,105,110,59,1,10718,4,3,65,101,116,14384,14389,14393,114,114,59,1,10498,59,3,8804,8402,4,2,59,114,14399,14402,3,60,8402,105,101,59,3,8884,8402,4,2,65,116,14414,14419,114,114,59,1,10499,114,105,101,59,3,8885,8402,105,109,59,3,8764,8402,4,3,65,97,110,14440,14445,14468,114,114,59,1,8662,114,4,2,104,114,14452,14456,107,59,1,10531,4,2,59,111,14462,14464,1,8598,119,59,1,8598,101,97,114,59,1,10535,4,18,83,97,99,100,101,102,103,104,105,108,109,111,112,114,115,116,117,118,14512,14515,14535,14560,14597,14603,14618,14643,14657,14662,14701,14741,14747,14769,14851,14877,14907,14916,59,1,9416,4,2,99,115,14521,14531,117,116,101,5,243,1,59,14529,1,243,116,59,1,8859,4,2,105,121,14541,14557,114,4,2,59,99,14548,14550,1,8858,5,244,1,59,14555,1,244,59,1,1086,4,5,97,98,105,111,115,14572,14577,14583,14587,14591,115,104,59,1,8861,108,97,99,59,1,337,118,59,1,10808,116,59,1,8857,111,108,100,59,1,10684,108,105,103,59,1,339,4,2,99,114,14609,14614,105,114,59,1,10687,59,3,55349,56620,4,3,111,114,116,14626,14630,14640,110,59,1,731,97,118,101,5,242,1,59,14638,1,242,59,1,10689,4,2,98,109,14649,14654,97,114,59,1,10677,59,1,937,110,116,59,1,8750,4,4,97,99,105,116,14672,14677,14693,14698,114,114,59,1,8634,4,2,105,114,14683,14687,114,59,1,10686,111,115,115,59,1,10683,110,101,59,1,8254,59,1,10688,4,3,97,101,105,14709,14714,14719,99,114,59,1,333,103,97,59,1,969,4,3,99,100,110,14727,14733,14736,114,111,110,59,1,959,59,1,10678,117,115,59,1,8854,112,102,59,3,55349,56672,4,3,97,101,108,14755,14759,14764,114,59,1,10679,114,112,59,1,10681,117,115,59,1,8853,4,7,59,97,100,105,111,115,118,14785,14787,14792,14831,14837,14841,14848,1,8744,114,114,59,1,8635,4,4,59,101,102,109,14802,14804,14817,14824,1,10845,114,4,2,59,111,14811,14813,1,8500,102,59,1,8500,5,170,1,59,14822,1,170,5,186,1,59,14829,1,186,103,111,102,59,1,8886,114,59,1,10838,108,111,112,101,59,1,10839,59,1,10843,4,3,99,108,111,14859,14863,14873,114,59,1,8500,97,115,104,5,248,1,59,14871,1,248,108,59,1,8856,105,4,2,108,109,14884,14893,100,101,5,245,1,59,14891,1,245,101,115,4,2,59,97,14901,14903,1,8855,115,59,1,10806,109,108,5,246,1,59,14914,1,246,98,97,114,59,1,9021,4,12,97,99,101,102,104,105,108,109,111,114,115,117,14948,14992,14996,15033,15038,15068,15090,15189,15192,15222,15427,15441,114,4,4,59,97,115,116,14959,14961,14976,14989,1,8741,5,182,2,59,108,14968,14970,1,182,108,101,108,59,1,8741,4,2,105,108,14982,14986,109,59,1,10995,59,1,11005,59,1,8706,121,59,1,1087,114,4,5,99,105,109,112,116,15009,15014,15019,15024,15027,110,116,59,1,37,111,100,59,1,46,105,108,59,1,8240,59,1,8869,101,110,107,59,1,8241,114,59,3,55349,56621,4,3,105,109,111,15046,15057,15063,4,2,59,118,15052,15054,1,966,59,1,981,109,97,116,59,1,8499,110,101,59,1,9742,4,3,59,116,118,15076,15078,15087,1,960,99,104,102,111,114,107,59,1,8916,59,1,982,4,2,97,117,15096,15119,110,4,2,99,107,15103,15115,107,4,2,59,104,15110,15112,1,8463,59,1,8462,118,59,1,8463,115,4,9,59,97,98,99,100,101,109,115,116,15140,15142,15148,15151,15156,15168,15171,15179,15184,1,43,99,105,114,59,1,10787,59,1,8862,105,114,59,1,10786,4,2,111,117,15162,15165,59,1,8724,59,1,10789,59,1,10866,110,5,177,1,59,15177,1,177,105,109,59,1,10790,119,111,59,1,10791,59,1,177,4,3,105,112,117,15200,15208,15213,110,116,105,110,116,59,1,10773,102,59,3,55349,56673,110,100,5,163,1,59,15220,1,163,4,10,59,69,97,99,101,105,110,111,115,117,15244,15246,15249,15253,15258,15334,15347,15367,15416,15421,1,8826,59,1,10931,112,59,1,10935,117,101,59,1,8828,4,2,59,99,15264,15266,1,10927,4,6,59,97,99,101,110,115,15280,15282,15290,15299,15303,15329,1,8826,112,112,114,111,120,59,1,10935,117,114,108,121,101,113,59,1,8828,113,59,1,10927,4,3,97,101,115,15311,15319,15324,112,112,114,111,120,59,1,10937,113,113,59,1,10933,105,109,59,1,8936,105,109,59,1,8830,109,101,4,2,59,115,15342,15344,1,8242,59,1,8473,4,3,69,97,115,15355,15358,15362,59,1,10933,112,59,1,10937,105,109,59,1,8936,4,3,100,102,112,15375,15378,15404,59,1,8719,4,3,97,108,115,15386,15392,15398,108,97,114,59,1,9006,105,110,101,59,1,8978,117,114,102,59,1,8979,4,2,59,116,15410,15412,1,8733,111,59,1,8733,105,109,59,1,8830,114,101,108,59,1,8880,4,2,99,105,15433,15438,114,59,3,55349,56517,59,1,968,110,99,115,112,59,1,8200,4,6,102,105,111,112,115,117,15462,15467,15472,15478,15485,15491,114,59,3,55349,56622,110,116,59,1,10764,112,102,59,3,55349,56674,114,105,109,101,59,1,8279,99,114,59,3,55349,56518,4,3,97,101,111,15499,15520,15534,116,4,2,101,105,15506,15515,114,110,105,111,110,115,59,1,8461,110,116,59,1,10774,115,116,4,2,59,101,15528,15530,1,63,113,59,1,8799,116,5,34,1,59,15540,1,34,4,21,65,66,72,97,98,99,100,101,102,104,105,108,109,110,111,112,114,115,116,117,120,15586,15609,15615,15620,15796,15855,15893,15931,15977,16001,16039,16183,16204,16222,16228,16285,16312,16318,16363,16408,16416,4,3,97,114,116,15594,15599,15603,114,114,59,1,8667,114,59,1,8658,97,105,108,59,1,10524,97,114,114,59,1,10511,97,114,59,1,10596,4,7,99,100,101,110,113,114,116,15636,15651,15656,15664,15687,15696,15770,4,2,101,117,15642,15646,59,3,8765,817,116,101,59,1,341,105,99,59,1,8730,109,112,116,121,118,59,1,10675,103,4,4,59,100,101,108,15675,15677,15680,15683,1,10217,59,1,10642,59,1,10661,101,59,1,10217,117,111,5,187,1,59,15694,1,187,114,4,11,59,97,98,99,102,104,108,112,115,116,119,15721,15723,15727,15739,15742,15746,15750,15754,15758,15763,15767,1,8594,112,59,1,10613,4,2,59,102,15733,15735,1,8677,115,59,1,10528,59,1,10547,115,59,1,10526,107,59,1,8618,112,59,1,8620,108,59,1,10565,105,109,59,1,10612,108,59,1,8611,59,1,8605,4,2,97,105,15776,15781,105,108,59,1,10522,111,4,2,59,110,15788,15790,1,8758,97,108,115,59,1,8474,4,3,97,98,114,15804,15809,15814,114,114,59,1,10509,114,107,59,1,10099,4,2,97,107,15820,15833,99,4,2,101,107,15827,15830,59,1,125,59,1,93,4,2,101,115,15839,15842,59,1,10636,108,4,2,100,117,15849,15852,59,1,10638,59,1,10640,4,4,97,101,117,121,15865,15871,15886,15890,114,111,110,59,1,345,4,2,100,105,15877,15882,105,108,59,1,343,108,59,1,8969,98,59,1,125,59,1,1088,4,4,99,108,113,115,15903,15907,15914,15927,97,59,1,10551,100,104,97,114,59,1,10601,117,111,4,2,59,114,15922,15924,1,8221,59,1,8221,104,59,1,8627,4,3,97,99,103,15939,15966,15970,108,4,4,59,105,112,115,15950,15952,15957,15963,1,8476,110,101,59,1,8475,97,114,116,59,1,8476,59,1,8477,116,59,1,9645,5,174,1,59,15975,1,174,4,3,105,108,114,15985,15991,15997,115,104,116,59,1,10621,111,111,114,59,1,8971,59,3,55349,56623,4,2,97,111,16007,16028,114,4,2,100,117,16014,16017,59,1,8641,4,2,59,108,16023,16025,1,8640,59,1,10604,4,2,59,118,16034,16036,1,961,59,1,1009,4,3,103,110,115,16047,16167,16171,104,116,4,6,97,104,108,114,115,116,16063,16081,16103,16130,16143,16155,114,114,111,119,4,2,59,116,16073,16075,1,8594,97,105,108,59,1,8611,97,114,112,111,111,110,4,2,100,117,16093,16099,111,119,110,59,1,8641,112,59,1,8640,101,102,116,4,2,97,104,16112,16120,114,114,111,119,115,59,1,8644,97,114,112,111,111,110,115,59,1,8652,105,103,104,116,97,114,114,111,119,115,59,1,8649,113,117,105,103,97,114,114,111,119,59,1,8605,104,114,101,101,116,105,109,101,115,59,1,8908,103,59,1,730,105,110,103,100,111,116,115,101,113,59,1,8787,4,3,97,104,109,16191,16196,16201,114,114,59,1,8644,97,114,59,1,8652,59,1,8207,111,117,115,116,4,2,59,97,16214,16216,1,9137,99,104,101,59,1,9137,109,105,100,59,1,10990,4,4,97,98,112,116,16238,16252,16257,16278,4,2,110,114,16244,16248,103,59,1,10221,114,59,1,8702,114,107,59,1,10215,4,3,97,102,108,16265,16269,16273,114,59,1,10630,59,3,55349,56675,117,115,59,1,10798,105,109,101,115,59,1,10805,4,2,97,112,16291,16304,114,4,2,59,103,16298,16300,1,41,116,59,1,10644,111,108,105,110,116,59,1,10770,97,114,114,59,1,8649,4,4,97,99,104,113,16328,16334,16339,16342,113,117,111,59,1,8250,114,59,3,55349,56519,59,1,8625,4,2,98,117,16348,16351,59,1,93,111,4,2,59,114,16358,16360,1,8217,59,1,8217,4,3,104,105,114,16371,16377,16383,114,101,101,59,1,8908,109,101,115,59,1,8906,105,4,4,59,101,102,108,16394,16396,16399,16402,1,9657,59,1,8885,59,1,9656,116,114,105,59,1,10702,108,117,104,97,114,59,1,10600,59,1,8478,4,19,97,98,99,100,101,102,104,105,108,109,111,112,113,114,115,116,117,119,122,16459,16466,16472,16572,16590,16672,16687,16746,16844,16850,16924,16963,16988,17115,17121,17154,17206,17614,17656,99,117,116,101,59,1,347,113,117,111,59,1,8218,4,10,59,69,97,99,101,105,110,112,115,121,16494,16496,16499,16513,16518,16531,16536,16556,16564,16569,1,8827,59,1,10932,4,2,112,114,16505,16508,59,1,10936,111,110,59,1,353,117,101,59,1,8829,4,2,59,100,16524,16526,1,10928,105,108,59,1,351,114,99,59,1,349,4,3,69,97,115,16544,16547,16551,59,1,10934,112,59,1,10938,105,109,59,1,8937,111,108,105,110,116,59,1,10771,105,109,59,1,8831,59,1,1089,111,116,4,3,59,98,101,16582,16584,16587,1,8901,59,1,8865,59,1,10854,4,7,65,97,99,109,115,116,120,16606,16611,16634,16642,16646,16652,16668,114,114,59,1,8664,114,4,2,104,114,16618,16622,107,59,1,10533,4,2,59,111,16628,16630,1,8600,119,59,1,8600,116,5,167,1,59,16640,1,167,105,59,1,59,119,97,114,59,1,10537,109,4,2,105,110,16659,16665,110,117,115,59,1,8726,59,1,8726,116,59,1,10038,114,4,2,59,111,16679,16682,3,55349,56624,119,110,59,1,8994,4,4,97,99,111,121,16697,16702,16716,16739,114,112,59,1,9839,4,2,104,121,16708,16713,99,121,59,1,1097,59,1,1096,114,116,4,2,109,112,16724,16729,105,100,59,1,8739,97,114,97,108,108,101,108,59,1,8741,5,173,1,59,16744,1,173,4,2,103,109,16752,16770,109,97,4,3,59,102,118,16762,16764,16767,1,963,59,1,962,59,1,962,4,8,59,100,101,103,108,110,112,114,16788,16790,16795,16806,16817,16828,16832,16838,1,8764,111,116,59,1,10858,4,2,59,113,16801,16803,1,8771,59,1,8771,4,2,59,69,16812,16814,1,10910,59,1,10912,4,2,59,69,16823,16825,1,10909,59,1,10911,101,59,1,8774,108,117,115,59,1,10788,97,114,114,59,1,10610,97,114,114,59,1,8592,4,4,97,101,105,116,16860,16883,16891,16904,4,2,108,115,16866,16878,108,115,101,116,109,105,110,117,115,59,1,8726,104,112,59,1,10803,112,97,114,115,108,59,1,10724,4,2,100,108,16897,16900,59,1,8739,101,59,1,8995,4,2,59,101,16910,16912,1,10922,4,2,59,115,16918,16920,1,10924,59,3,10924,65024,4,3,102,108,112,16932,16938,16958,116,99,121,59,1,1100,4,2,59,98,16944,16946,1,47,4,2,59,97,16952,16954,1,10692,114,59,1,9023,102,59,3,55349,56676,97,4,2,100,114,16970,16985,101,115,4,2,59,117,16978,16980,1,9824,105,116,59,1,9824,59,1,8741,4,3,99,115,117,16996,17028,17089,4,2,97,117,17002,17015,112,4,2,59,115,17009,17011,1,8851,59,3,8851,65024,112,4,2,59,115,17022,17024,1,8852,59,3,8852,65024,117,4,2,98,112,17035,17062,4,3,59,101,115,17043,17045,17048,1,8847,59,1,8849,101,116,4,2,59,101,17056,17058,1,8847,113,59,1,8849,4,3,59,101,115,17070,17072,17075,1,8848,59,1,8850,101,116,4,2,59,101,17083,17085,1,8848,113,59,1,8850,4,3,59,97,102,17097,17099,17112,1,9633,114,4,2,101,102,17106,17109,59,1,9633,59,1,9642,59,1,9642,97,114,114,59,1,8594,4,4,99,101,109,116,17131,17136,17142,17148,114,59,3,55349,56520,116,109,110,59,1,8726,105,108,101,59,1,8995,97,114,102,59,1,8902,4,2,97,114,17160,17172,114,4,2,59,102,17167,17169,1,9734,59,1,9733,4,2,97,110,17178,17202,105,103,104,116,4,2,101,112,17188,17197,112,115,105,108,111,110,59,1,1013,104,105,59,1,981,115,59,1,175,4,5,98,99,109,110,112,17218,17351,17420,17423,17427,4,9,59,69,100,101,109,110,112,114,115,17238,17240,17243,17248,17261,17267,17279,17285,17291,1,8834,59,1,10949,111,116,59,1,10941,4,2,59,100,17254,17256,1,8838,111,116,59,1,10947,117,108,116,59,1,10945,4,2,69,101,17273,17276,59,1,10955,59,1,8842,108,117,115,59,1,10943,97,114,114,59,1,10617,4,3,101,105,117,17299,17335,17339,116,4,3,59,101,110,17308,17310,17322,1,8834,113,4,2,59,113,17317,17319,1,8838,59,1,10949,101,113,4,2,59,113,17330,17332,1,8842,59,1,10955,109,59,1,10951,4,2,98,112,17345,17348,59,1,10965,59,1,10963,99,4,6,59,97,99,101,110,115,17366,17368,17376,17385,17389,17415,1,8827,112,112,114,111,120,59,1,10936,117,114,108,121,101,113,59,1,8829,113,59,1,10928,4,3,97,101,115,17397,17405,17410,112,112,114,111,120,59,1,10938,113,113,59,1,10934,105,109,59,1,8937,105,109,59,1,8831,59,1,8721,103,59,1,9834,4,13,49,50,51,59,69,100,101,104,108,109,110,112,115,17455,17462,17469,17476,17478,17481,17496,17509,17524,17530,17536,17548,17554,5,185,1,59,17460,1,185,5,178,1,59,17467,1,178,5,179,1,59,17474,1,179,1,8835,59,1,10950,4,2,111,115,17487,17491,116,59,1,10942,117,98,59,1,10968,4,2,59,100,17502,17504,1,8839,111,116,59,1,10948,115,4,2,111,117,17516,17520,108,59,1,10185,98,59,1,10967,97,114,114,59,1,10619,117,108,116,59,1,10946,4,2,69,101,17542,17545,59,1,10956,59,1,8843,108,117,115,59,1,10944,4,3,101,105,117,17562,17598,17602,116,4,3,59,101,110,17571,17573,17585,1,8835,113,4,2,59,113,17580,17582,1,8839,59,1,10950,101,113,4,2,59,113,17593,17595,1,8843,59,1,10956,109,59,1,10952,4,2,98,112,17608,17611,59,1,10964,59,1,10966,4,3,65,97,110,17622,17627,17650,114,114,59,1,8665,114,4,2,104,114,17634,17638,107,59,1,10534,4,2,59,111,17644,17646,1,8601,119,59,1,8601,119,97,114,59,1,10538,108,105,103,5,223,1,59,17664,1,223,4,13,97,98,99,100,101,102,104,105,111,112,114,115,119,17694,17709,17714,17737,17742,17749,17754,17860,17905,17957,17964,18090,18122,4,2,114,117,17700,17706,103,101,116,59,1,8982,59,1,964,114,107,59,1,9140,4,3,97,101,121,17722,17728,17734,114,111,110,59,1,357,100,105,108,59,1,355,59,1,1090,111,116,59,1,8411,108,114,101,99,59,1,8981,114,59,3,55349,56625,4,4,101,105,107,111,17764,17805,17836,17851,4,2,114,116,17770,17786,101,4,2,52,102,17777,17780,59,1,8756,111,114,101,59,1,8756,97,4,3,59,115,118,17795,17797,17802,1,952,121,109,59,1,977,59,1,977,4,2,99,110,17811,17831,107,4,2,97,115,17818,17826,112,112,114,111,120,59,1,8776,105,109,59,1,8764,115,112,59,1,8201,4,2,97,115,17842,17846,112,59,1,8776,105,109,59,1,8764,114,110,5,254,1,59,17858,1,254,4,3,108,109,110,17868,17873,17901,100,101,59,1,732,101,115,5,215,3,59,98,100,17884,17886,17898,1,215,4,2,59,97,17892,17894,1,8864,114,59,1,10801,59,1,10800,116,59,1,8749,4,3,101,112,115,17913,17917,17953,97,59,1,10536,4,4,59,98,99,102,17927,17929,17934,17939,1,8868,111,116,59,1,9014,105,114,59,1,10993,4,2,59,111,17945,17948,3,55349,56677,114,107,59,1,10970,97,59,1,10537,114,105,109,101,59,1,8244,4,3,97,105,112,17972,17977,18082,100,101,59,1,8482,4,7,97,100,101,109,112,115,116,17993,18051,18056,18059,18066,18072,18076,110,103,108,101,4,5,59,100,108,113,114,18009,18011,18017,18032,18035,1,9653,111,119,110,59,1,9663,101,102,116,4,2,59,101,18026,18028,1,9667,113,59,1,8884,59,1,8796,105,103,104,116,4,2,59,101,18045,18047,1,9657,113,59,1,8885,111,116,59,1,9708,59,1,8796,105,110,117,115,59,1,10810,108,117,115,59,1,10809,98,59,1,10701,105,109,101,59,1,10811,101,122,105,117,109,59,1,9186,4,3,99,104,116,18098,18111,18116,4,2,114,121,18104,18108,59,3,55349,56521,59,1,1094,99,121,59,1,1115,114,111,107,59,1,359,4,2,105,111,18128,18133,120,116,59,1,8812,104,101,97,100,4,2,108,114,18143,18154,101,102,116,97,114,114,111,119,59,1,8606,105,103,104,116,97,114,114,111,119,59,1,8608,4,18,65,72,97,98,99,100,102,103,104,108,109,111,112,114,115,116,117,119,18204,18209,18214,18234,18250,18268,18292,18308,18319,18343,18379,18397,18413,18504,18547,18553,18584,18603,114,114,59,1,8657,97,114,59,1,10595,4,2,99,114,18220,18230,117,116,101,5,250,1,59,18228,1,250,114,59,1,8593,114,4,2,99,101,18241,18245,121,59,1,1118,118,101,59,1,365,4,2,105,121,18256,18265,114,99,5,251,1,59,18263,1,251,59,1,1091,4,3,97,98,104,18276,18281,18287,114,114,59,1,8645,108,97,99,59,1,369,97,114,59,1,10606,4,2,105,114,18298,18304,115,104,116,59,1,10622,59,3,55349,56626,114,97,118,101,5,249,1,59,18317,1,249,4,2,97,98,18325,18338,114,4,2,108,114,18332,18335,59,1,8639,59,1,8638,108,107,59,1,9600,4,2,99,116,18349,18374,4,2,111,114,18355,18369,114,110,4,2,59,101,18363,18365,1,8988,114,59,1,8988,111,112,59,1,8975,114,105,59,1,9720,4,2,97,108,18385,18390,99,114,59,1,363,5,168,1,59,18395,1,168,4,2,103,112,18403,18408,111,110,59,1,371,102,59,3,55349,56678,4,6,97,100,104,108,115,117,18427,18434,18445,18470,18475,18494,114,114,111,119,59,1,8593,111,119,110,97,114,114,111,119,59,1,8597,97,114,112,111,111,110,4,2,108,114,18457,18463,101,102,116,59,1,8639,105,103,104,116,59,1,8638,117,115,59,1,8846,105,4,3,59,104,108,18484,18486,18489,1,965,59,1,978,111,110,59,1,965,112,97,114,114,111,119,115,59,1,8648,4,3,99,105,116,18512,18537,18542,4,2,111,114,18518,18532,114,110,4,2,59,101,18526,18528,1,8989,114,59,1,8989,111,112,59,1,8974,110,103,59,1,367,114,105,59,1,9721,99,114,59,3,55349,56522,4,3,100,105,114,18561,18566,18572,111,116,59,1,8944,108,100,101,59,1,361,105,4,2,59,102,18579,18581,1,9653,59,1,9652,4,2,97,109,18590,18595,114,114,59,1,8648,108,5,252,1,59,18601,1,252,97,110,103,108,101,59,1,10663,4,15,65,66,68,97,99,100,101,102,108,110,111,112,114,115,122,18643,18648,18661,18667,18847,18851,18857,18904,18909,18915,18931,18937,18943,18949,18996,114,114,59,1,8661,97,114,4,2,59,118,18656,18658,1,10984,59,1,10985,97,115,104,59,1,8872,4,2,110,114,18673,18679,103,114,116,59,1,10652,4,7,101,107,110,112,114,115,116,18695,18704,18711,18720,18742,18754,18810,112,115,105,108,111,110,59,1,1013,97,112,112,97,59,1,1008,111,116,104,105,110,103,59,1,8709,4,3,104,105,114,18728,18732,18735,105,59,1,981,59,1,982,111,112,116,111,59,1,8733,4,2,59,104,18748,18750,1,8597,111,59,1,1009,4,2,105,117,18760,18766,103,109,97,59,1,962,4,2,98,112,18772,18791,115,101,116,110,101,113,4,2,59,113,18784,18787,3,8842,65024,59,3,10955,65024,115,101,116,110,101,113,4,2,59,113,18803,18806,3,8843,65024,59,3,10956,65024,4,2,104,114,18816,18822,101,116,97,59,1,977,105,97,110,103,108,101,4,2,108,114,18834,18840,101,102,116,59,1,8882,105,103,104,116,59,1,8883,121,59,1,1074,97,115,104,59,1,8866,4,3,101,108,114,18865,18884,18890,4,3,59,98,101,18873,18875,18880,1,8744,97,114,59,1,8891,113,59,1,8794,108,105,112,59,1,8942,4,2,98,116,18896,18901,97,114,59,1,124,59,1,124,114,59,3,55349,56627,116,114,105,59,1,8882,115,117,4,2,98,112,18923,18927,59,3,8834,8402,59,3,8835,8402,112,102,59,3,55349,56679,114,111,112,59,1,8733,116,114,105,59,1,8883,4,2,99,117,18955,18960,114,59,3,55349,56523,4,2,98,112,18966,18981,110,4,2,69,101,18973,18977,59,3,10955,65024,59,3,8842,65024,110,4,2,69,101,18988,18992,59,3,10956,65024,59,3,8843,65024,105,103,122,97,103,59,1,10650,4,7,99,101,102,111,112,114,115,19020,19026,19061,19066,19072,19075,19089,105,114,99,59,1,373,4,2,100,105,19032,19055,4,2,98,103,19038,19043,97,114,59,1,10847,101,4,2,59,113,19050,19052,1,8743,59,1,8793,101,114,112,59,1,8472,114,59,3,55349,56628,112,102,59,3,55349,56680,59,1,8472,4,2,59,101,19081,19083,1,8768,97,116,104,59,1,8768,99,114,59,3,55349,56524,4,14,99,100,102,104,105,108,109,110,111,114,115,117,118,119,19125,19146,19152,19157,19173,19176,19192,19197,19202,19236,19252,19269,19286,19291,4,3,97,105,117,19133,19137,19142,112,59,1,8898,114,99,59,1,9711,112,59,1,8899,116,114,105,59,1,9661,114,59,3,55349,56629,4,2,65,97,19163,19168,114,114,59,1,10234,114,114,59,1,10231,59,1,958,4,2,65,97,19182,19187,114,114,59,1,10232,114,114,59,1,10229,97,112,59,1,10236,105,115,59,1,8955,4,3,100,112,116,19210,19215,19230,111,116,59,1,10752,4,2,102,108,19221,19225,59,3,55349,56681,117,115,59,1,10753,105,109,101,59,1,10754,4,2,65,97,19242,19247,114,114,59,1,10233,114,114,59,1,10230,4,2,99,113,19258,19263,114,59,3,55349,56525,99,117,112,59,1,10758,4,2,112,116,19275,19281,108,117,115,59,1,10756,114,105,59,1,9651,101,101,59,1,8897,101,100,103,101,59,1,8896,4,8,97,99,101,102,105,111,115,117,19316,19335,19349,19357,19362,19367,19373,19379,99,4,2,117,121,19323,19332,116,101,5,253,1,59,19330,1,253,59,1,1103,4,2,105,121,19341,19346,114,99,59,1,375,59,1,1099,110,5,165,1,59,19355,1,165,114,59,3,55349,56630,99,121,59,1,1111,112,102,59,3,55349,56682,99,114,59,3,55349,56526,4,2,99,109,19385,19389,121,59,1,1102,108,5,255,1,59,19395,1,255,4,10,97,99,100,101,102,104,105,111,115,119,19419,19426,19441,19446,19462,19467,19472,19480,19486,19492,99,117,116,101,59,1,378,4,2,97,121,19432,19438,114,111,110,59,1,382,59,1,1079,111,116,59,1,380,4,2,101,116,19452,19458,116,114,102,59,1,8488,97,59,1,950,114,59,3,55349,56631,99,121,59,1,1078,103,114,97,114,114,59,1,8669,112,102,59,3,55349,56683,99,114,59,3,55349,56527,4,2,106,110,19498,19501,59,1,8205,106,59,1,8204]);
+
+/***/ }),
 /* 319 */,
 /* 320 */,
 /* 321 */,
@@ -19097,7 +21179,76 @@ var MatchKind;
 /* 328 */,
 /* 329 */,
 /* 330 */,
-/* 331 */,
+/* 331 */
+/***/ (function(__unusedmodule, exports) {
+
+"use strict";
+
+
+exports.identifierStart = identifierStart
+exports.identifier = identifier
+
+var fromCharCode = String.fromCharCode
+
+var dollarSign = 36 // '$'
+var digit0 = 48 // '0'
+var digit9 = 57 // '9'
+var uppercaseA = 65 // 'A'
+var uppercaseZ = 90 // 'Z'
+var underscore = 95 // '_'
+var lowercaseA = 97 // 'a'
+var lowercaseZ = 122 // 'z'
+
+var nonAsciiIdentifierStartChars =
+  '\xaa\xb5\xba\xc0-\xd6\xd8-\xf6\xf8-\u02c1\u02c6-\u02d1\u02e0-\u02e4\u02ec\u02ee\u0370-\u0374\u0376\u0377\u037a-\u037d\u037f\u0386\u0388-\u038a\u038c\u038e-\u03a1\u03a3-\u03f5\u03f7-\u0481\u048a-\u052f\u0531-\u0556\u0559\u0560-\u0588\u05d0-\u05ea\u05ef-\u05f2\u0620-\u064a\u066e\u066f\u0671-\u06d3\u06d5\u06e5\u06e6\u06ee\u06ef\u06fa-\u06fc\u06ff\u0710\u0712-\u072f\u074d-\u07a5\u07b1\u07ca-\u07ea\u07f4\u07f5\u07fa\u0800-\u0815\u081a\u0824\u0828\u0840-\u0858\u0860-\u086a\u08a0-\u08b4\u08b6-\u08c7\u0904-\u0939\u093d\u0950\u0958-\u0961\u0971-\u0980\u0985-\u098c\u098f\u0990\u0993-\u09a8\u09aa-\u09b0\u09b2\u09b6-\u09b9\u09bd\u09ce\u09dc\u09dd\u09df-\u09e1\u09f0\u09f1\u09fc\u0a05-\u0a0a\u0a0f\u0a10\u0a13-\u0a28\u0a2a-\u0a30\u0a32\u0a33\u0a35\u0a36\u0a38\u0a39\u0a59-\u0a5c\u0a5e\u0a72-\u0a74\u0a85-\u0a8d\u0a8f-\u0a91\u0a93-\u0aa8\u0aaa-\u0ab0\u0ab2\u0ab3\u0ab5-\u0ab9\u0abd\u0ad0\u0ae0\u0ae1\u0af9\u0b05-\u0b0c\u0b0f\u0b10\u0b13-\u0b28\u0b2a-\u0b30\u0b32\u0b33\u0b35-\u0b39\u0b3d\u0b5c\u0b5d\u0b5f-\u0b61\u0b71\u0b83\u0b85-\u0b8a\u0b8e-\u0b90\u0b92-\u0b95\u0b99\u0b9a\u0b9c\u0b9e\u0b9f\u0ba3\u0ba4\u0ba8-\u0baa\u0bae-\u0bb9\u0bd0\u0c05-\u0c0c\u0c0e-\u0c10\u0c12-\u0c28\u0c2a-\u0c39\u0c3d\u0c58-\u0c5a\u0c60\u0c61\u0c80\u0c85-\u0c8c\u0c8e-\u0c90\u0c92-\u0ca8\u0caa-\u0cb3\u0cb5-\u0cb9\u0cbd\u0cde\u0ce0\u0ce1\u0cf1\u0cf2\u0d04-\u0d0c\u0d0e-\u0d10\u0d12-\u0d3a\u0d3d\u0d4e\u0d54-\u0d56\u0d5f-\u0d61\u0d7a-\u0d7f\u0d85-\u0d96\u0d9a-\u0db1\u0db3-\u0dbb\u0dbd\u0dc0-\u0dc6\u0e01-\u0e30\u0e32\u0e33\u0e40-\u0e46\u0e81\u0e82\u0e84\u0e86-\u0e8a\u0e8c-\u0ea3\u0ea5\u0ea7-\u0eb0\u0eb2\u0eb3\u0ebd\u0ec0-\u0ec4\u0ec6\u0edc-\u0edf\u0f00\u0f40-\u0f47\u0f49-\u0f6c\u0f88-\u0f8c\u1000-\u102a\u103f\u1050-\u1055\u105a-\u105d\u1061\u1065\u1066\u106e-\u1070\u1075-\u1081\u108e\u10a0-\u10c5\u10c7\u10cd\u10d0-\u10fa\u10fc-\u1248\u124a-\u124d\u1250-\u1256\u1258\u125a-\u125d\u1260-\u1288\u128a-\u128d\u1290-\u12b0\u12b2-\u12b5\u12b8-\u12be\u12c0\u12c2-\u12c5\u12c8-\u12d6\u12d8-\u1310\u1312-\u1315\u1318-\u135a\u1380-\u138f\u13a0-\u13f5\u13f8-\u13fd\u1401-\u166c\u166f-\u167f\u1681-\u169a\u16a0-\u16ea\u16ee-\u16f8\u1700-\u170c\u170e-\u1711\u1720-\u1731\u1740-\u1751\u1760-\u176c\u176e-\u1770\u1780-\u17b3\u17d7\u17dc\u1820-\u1878\u1880-\u18a8\u18aa\u18b0-\u18f5\u1900-\u191e\u1950-\u196d\u1970-\u1974\u1980-\u19ab\u19b0-\u19c9\u1a00-\u1a16\u1a20-\u1a54\u1aa7\u1b05-\u1b33\u1b45-\u1b4b\u1b83-\u1ba0\u1bae\u1baf\u1bba-\u1be5\u1c00-\u1c23\u1c4d-\u1c4f\u1c5a-\u1c7d\u1c80-\u1c88\u1c90-\u1cba\u1cbd-\u1cbf\u1ce9-\u1cec\u1cee-\u1cf3\u1cf5\u1cf6\u1cfa\u1d00-\u1dbf\u1e00-\u1f15\u1f18-\u1f1d\u1f20-\u1f45\u1f48-\u1f4d\u1f50-\u1f57\u1f59\u1f5b\u1f5d\u1f5f-\u1f7d\u1f80-\u1fb4\u1fb6-\u1fbc\u1fbe\u1fc2-\u1fc4\u1fc6-\u1fcc\u1fd0-\u1fd3\u1fd6-\u1fdb\u1fe0-\u1fec\u1ff2-\u1ff4\u1ff6-\u1ffc\u2071\u207f\u2090-\u209c\u2102\u2107\u210a-\u2113\u2115\u2118-\u211d\u2124\u2126\u2128\u212a-\u2139\u213c-\u213f\u2145-\u2149\u214e\u2160-\u2188\u2c00-\u2c2e\u2c30-\u2c5e\u2c60-\u2ce4\u2ceb-\u2cee\u2cf2\u2cf3\u2d00-\u2d25\u2d27\u2d2d\u2d30-\u2d67\u2d6f\u2d80-\u2d96\u2da0-\u2da6\u2da8-\u2dae\u2db0-\u2db6\u2db8-\u2dbe\u2dc0-\u2dc6\u2dc8-\u2dce\u2dd0-\u2dd6\u2dd8-\u2dde\u3005-\u3007\u3021-\u3029\u3031-\u3035\u3038-\u303c\u3041-\u3096\u309b-\u309f\u30a1-\u30fa\u30fc-\u30ff\u3105-\u312f\u3131-\u318e\u31a0-\u31bf\u31f0-\u31ff\u3400-\u4dbf\u4e00-\u9ffc\ua000-\ua48c\ua4d0-\ua4fd\ua500-\ua60c\ua610-\ua61f\ua62a\ua62b\ua640-\ua66e\ua67f-\ua69d\ua6a0-\ua6ef\ua717-\ua71f\ua722-\ua788\ua78b-\ua7bf\ua7c2-\ua7ca\ua7f5-\ua801\ua803-\ua805\ua807-\ua80a\ua80c-\ua822\ua840-\ua873\ua882-\ua8b3\ua8f2-\ua8f7\ua8fb\ua8fd\ua8fe\ua90a-\ua925\ua930-\ua946\ua960-\ua97c\ua984-\ua9b2\ua9cf\ua9e0-\ua9e4\ua9e6-\ua9ef\ua9fa-\ua9fe\uaa00-\uaa28\uaa40-\uaa42\uaa44-\uaa4b\uaa60-\uaa76\uaa7a\uaa7e-\uaaaf\uaab1\uaab5\uaab6\uaab9-\uaabd\uaac0\uaac2\uaadb-\uaadd\uaae0-\uaaea\uaaf2-\uaaf4\uab01-\uab06\uab09-\uab0e\uab11-\uab16\uab20-\uab26\uab28-\uab2e\uab30-\uab5a\uab5c-\uab69\uab70-\uabe2\uac00-\ud7a3\ud7b0-\ud7c6\ud7cb-\ud7fb\uf900-\ufa6d\ufa70-\ufad9\ufb00-\ufb06\ufb13-\ufb17\ufb1d\ufb1f-\ufb28\ufb2a-\ufb36\ufb38-\ufb3c\ufb3e\ufb40\ufb41\ufb43\ufb44\ufb46-\ufbb1\ufbd3-\ufd3d\ufd50-\ufd8f\ufd92-\ufdc7\ufdf0-\ufdfb\ufe70-\ufe74\ufe76-\ufefc\uff21-\uff3a\uff41-\uff5a\uff66-\uffbe\uffc2-\uffc7\uffca-\uffcf\uffd2-\uffd7\uffda-\uffdc'
+
+var nonAsciiIdentifierChars =
+  '\u200c\u200d\xb7\u0300-\u036f\u0387\u0483-\u0487\u0591-\u05bd\u05bf\u05c1\u05c2\u05c4\u05c5\u05c7\u0610-\u061a\u064b-\u0669\u0670\u06d6-\u06dc\u06df-\u06e4\u06e7\u06e8\u06ea-\u06ed\u06f0-\u06f9\u0711\u0730-\u074a\u07a6-\u07b0\u07c0-\u07c9\u07eb-\u07f3\u07fd\u0816-\u0819\u081b-\u0823\u0825-\u0827\u0829-\u082d\u0859-\u085b\u08d3-\u08e1\u08e3-\u0903\u093a-\u093c\u093e-\u094f\u0951-\u0957\u0962\u0963\u0966-\u096f\u0981-\u0983\u09bc\u09be-\u09c4\u09c7\u09c8\u09cb-\u09cd\u09d7\u09e2\u09e3\u09e6-\u09ef\u09fe\u0a01-\u0a03\u0a3c\u0a3e-\u0a42\u0a47\u0a48\u0a4b-\u0a4d\u0a51\u0a66-\u0a71\u0a75\u0a81-\u0a83\u0abc\u0abe-\u0ac5\u0ac7-\u0ac9\u0acb-\u0acd\u0ae2\u0ae3\u0ae6-\u0aef\u0afa-\u0aff\u0b01-\u0b03\u0b3c\u0b3e-\u0b44\u0b47\u0b48\u0b4b-\u0b4d\u0b55-\u0b57\u0b62\u0b63\u0b66-\u0b6f\u0b82\u0bbe-\u0bc2\u0bc6-\u0bc8\u0bca-\u0bcd\u0bd7\u0be6-\u0bef\u0c00-\u0c04\u0c3e-\u0c44\u0c46-\u0c48\u0c4a-\u0c4d\u0c55\u0c56\u0c62\u0c63\u0c66-\u0c6f\u0c81-\u0c83\u0cbc\u0cbe-\u0cc4\u0cc6-\u0cc8\u0cca-\u0ccd\u0cd5\u0cd6\u0ce2\u0ce3\u0ce6-\u0cef\u0d00-\u0d03\u0d3b\u0d3c\u0d3e-\u0d44\u0d46-\u0d48\u0d4a-\u0d4d\u0d57\u0d62\u0d63\u0d66-\u0d6f\u0d81-\u0d83\u0dca\u0dcf-\u0dd4\u0dd6\u0dd8-\u0ddf\u0de6-\u0def\u0df2\u0df3\u0e31\u0e34-\u0e3a\u0e47-\u0e4e\u0e50-\u0e59\u0eb1\u0eb4-\u0ebc\u0ec8-\u0ecd\u0ed0-\u0ed9\u0f18\u0f19\u0f20-\u0f29\u0f35\u0f37\u0f39\u0f3e\u0f3f\u0f71-\u0f84\u0f86\u0f87\u0f8d-\u0f97\u0f99-\u0fbc\u0fc6\u102b-\u103e\u1040-\u1049\u1056-\u1059\u105e-\u1060\u1062-\u1064\u1067-\u106d\u1071-\u1074\u1082-\u108d\u108f-\u109d\u135d-\u135f\u1369-\u1371\u1712-\u1714\u1732-\u1734\u1752\u1753\u1772\u1773\u17b4-\u17d3\u17dd\u17e0-\u17e9\u180b-\u180d\u1810-\u1819\u18a9\u1920-\u192b\u1930-\u193b\u1946-\u194f\u19d0-\u19da\u1a17-\u1a1b\u1a55-\u1a5e\u1a60-\u1a7c\u1a7f-\u1a89\u1a90-\u1a99\u1ab0-\u1abd\u1abf\u1ac0\u1b00-\u1b04\u1b34-\u1b44\u1b50-\u1b59\u1b6b-\u1b73\u1b80-\u1b82\u1ba1-\u1bad\u1bb0-\u1bb9\u1be6-\u1bf3\u1c24-\u1c37\u1c40-\u1c49\u1c50-\u1c59\u1cd0-\u1cd2\u1cd4-\u1ce8\u1ced\u1cf4\u1cf7-\u1cf9\u1dc0-\u1df9\u1dfb-\u1dff\u203f\u2040\u2054\u20d0-\u20dc\u20e1\u20e5-\u20f0\u2cef-\u2cf1\u2d7f\u2de0-\u2dff\u302a-\u302f\u3099\u309a\ua620-\ua629\ua66f\ua674-\ua67d\ua69e\ua69f\ua6f0\ua6f1\ua802\ua806\ua80b\ua823-\ua827\ua82c\ua880\ua881\ua8b4-\ua8c5\ua8d0-\ua8d9\ua8e0-\ua8f1\ua8ff-\ua909\ua926-\ua92d\ua947-\ua953\ua980-\ua983\ua9b3-\ua9c0\ua9d0-\ua9d9\ua9e5\ua9f0-\ua9f9\uaa29-\uaa36\uaa43\uaa4c\uaa4d\uaa50-\uaa59\uaa7b-\uaa7d\uaab0\uaab2-\uaab4\uaab7\uaab8\uaabe\uaabf\uaac1\uaaeb-\uaaef\uaaf5\uaaf6\uabe3-\uabea\uabec\uabed\uabf0-\uabf9\ufb1e\ufe00-\ufe0f\ufe20-\ufe2f\ufe33\ufe34\ufe4d-\ufe4f\uff10-\uff19\uff3f'
+
+var nonAsciiIdentifierStartRe = new RegExp(
+  '[' + nonAsciiIdentifierStartChars + ']'
+)
+
+var nonAsciiIdentifierRe = new RegExp(
+  '[' + nonAsciiIdentifierStartChars + nonAsciiIdentifierChars + ']'
+)
+
+nonAsciiIdentifierStartChars = null
+nonAsciiIdentifierChars = null
+
+// To do: support astrals.
+function identifierStart(code) {
+  return code < 160 ? asciiIdentifierStart(code) : nonAsciiIdentifierStart(code)
+}
+
+// To do: support astrals.
+function identifier(code) {
+  return code < 160 ? asciiIdentifier(code) : nonAsciiIdentifier(code)
+}
+
+function asciiIdentifierStart(code) {
+  return (
+    code === dollarSign ||
+    (code >= uppercaseA && code <= uppercaseZ) ||
+    code === underscore ||
+    (code >= lowercaseA && code <= lowercaseZ)
+  )
+}
+
+function asciiIdentifier(code) {
+  return asciiIdentifierStart(code) || (code >= digit0 && code <= digit9)
+}
+
+function nonAsciiIdentifierStart(code) {
+  return nonAsciiIdentifierStartRe.test(fromCharCode(code))
+}
+
+function nonAsciiIdentifier(code) {
+  return nonAsciiIdentifierRe.test(fromCharCode(code))
+}
+
+
+/***/ }),
 /* 332 */,
 /* 333 */,
 /* 334 */
@@ -19232,7 +21383,10 @@ module.exports = value => {
 "use strict";
 
 
+var ccount = __webpack_require__(126)
 var decode = __webpack_require__(277)
+var decimal = __webpack_require__(926)
+var alphabetical = __webpack_require__(341)
 var whitespace = __webpack_require__(578)
 var locate = __webpack_require__(716)
 
@@ -19240,124 +21394,114 @@ module.exports = url
 url.locator = locate
 url.notInLink = true
 
-var quotationMark = '"'
-var apostrophe = "'"
-var leftParenthesis = '('
-var rightParenthesis = ')'
-var comma = ','
-var dot = '.'
-var colon = ':'
-var semicolon = ';'
-var lessThan = '<'
-var atSign = '@'
-var leftSquareBracket = '['
-var rightSquareBracket = ']'
+var exclamationMark = 33 // '!'
+var ampersand = 38 // '&'
+var rightParenthesis = 41 // ')'
+var asterisk = 42 // '*'
+var comma = 44 // ','
+var dash = 45 // '-'
+var dot = 46 // '.'
+var colon = 58 // ':'
+var semicolon = 59 // ';'
+var questionMark = 63 // '?'
+var lessThan = 60 // '<'
+var underscore = 95 // '_'
+var tilde = 126 // '~'
 
-var http = 'http://'
-var https = 'https://'
-var mailto = 'mailto:'
-
-var protocols = [http, https, mailto]
-
-var protocolsLength = protocols.length
+var leftParenthesisCharacter = '('
+var rightParenthesisCharacter = ')'
 
 function url(eat, value, silent) {
   var self = this
-  var subvalue
-  var content
-  var character
+  var gfm = self.options.gfm
+  var tokenizers = self.inlineTokenizers
+  var length = value.length
+  var previousDot = -1
+  var protocolless = false
+  var dots
+  var lastTwoPartsStart
+  var start
   var index
-  var position
-  var protocol
-  var match
-  var length
-  var queue
-  var parenCount
-  var nextCharacter
-  var tokenizers
+  var pathStart
+  var path
+  var code
+  var end
+  var leftCount
+  var rightCount
+  var content
+  var children
+  var url
   var exit
 
-  if (!self.options.gfm) {
+  if (!gfm) {
     return
   }
 
-  subvalue = ''
-  index = -1
-
-  while (++index < protocolsLength) {
-    protocol = protocols[index]
-    match = value.slice(0, protocol.length)
-
-    if (match.toLowerCase() === protocol) {
-      subvalue = match
-      break
-    }
-  }
-
-  if (!subvalue) {
+  // `WWW.` doesn’t work.
+  if (value.slice(0, 4) === 'www.') {
+    protocolless = true
+    index = 4
+  } else if (value.slice(0, 7).toLowerCase() === 'http://') {
+    index = 7
+  } else if (value.slice(0, 8).toLowerCase() === 'https://') {
+    index = 8
+  } else {
     return
   }
 
-  index = subvalue.length
-  length = value.length
-  queue = ''
-  parenCount = 0
+  // Act as if the starting boundary is a dot.
+  previousDot = index - 1
+
+  // Parse a valid domain.
+  start = index
+  dots = []
 
   while (index < length) {
-    character = value.charAt(index)
+    code = value.charCodeAt(index)
 
-    if (whitespace(character) || character === lessThan) {
-      break
+    if (code === dot) {
+      // Dots may not appear after each other.
+      if (previousDot === index - 1) {
+        break
+      }
+
+      dots.push(index)
+      previousDot = index
+      index++
+      continue
     }
 
     if (
-      character === dot ||
-      character === comma ||
-      character === colon ||
-      character === semicolon ||
-      character === quotationMark ||
-      character === apostrophe ||
-      character === rightParenthesis ||
-      character === rightSquareBracket
+      decimal(code) ||
+      alphabetical(code) ||
+      code === dash ||
+      code === underscore
     ) {
-      nextCharacter = value.charAt(index + 1)
-
-      if (!nextCharacter || whitespace(nextCharacter)) {
-        break
-      }
+      index++
+      continue
     }
 
-    if (character === leftParenthesis || character === leftSquareBracket) {
-      parenCount++
-    }
-
-    if (character === rightParenthesis || character === rightSquareBracket) {
-      parenCount--
-
-      if (parenCount < 0) {
-        break
-      }
-    }
-
-    queue += character
-    index++
+    break
   }
 
-  if (!queue) {
+  // Ignore a final dot:
+  if (code === dot) {
+    dots.pop()
+    index--
+  }
+
+  // If there are not dots, exit.
+  if (dots[0] === undefined) {
     return
   }
 
-  subvalue += queue
-  content = subvalue
+  // If there is an underscore in the last two domain parts, exit:
+  // `www.example.c_m` and `www.ex_ample.com` are not OK, but
+  // `www.sub_domain.example.com` is.
+  lastTwoPartsStart = dots.length < 2 ? start : dots[dots.length - 2] + 1
 
-  if (protocol === mailto) {
-    position = queue.indexOf(atSign)
-
-    if (position === -1 || position === length - 1) {
-      return
-    }
-
-    content = content.slice(mailto.length)
+  if (value.slice(lastTwoPartsStart, index).indexOf('_') !== -1) {
+    return
   }
 
   /* istanbul ignore if - never used (yet) */
@@ -19365,23 +21509,87 @@ function url(eat, value, silent) {
     return true
   }
 
+  end = index
+  pathStart = index
+
+  // Parse a path.
+  while (index < length) {
+    code = value.charCodeAt(index)
+
+    if (whitespace(code) || code === lessThan) {
+      break
+    }
+
+    index++
+
+    if (
+      code === exclamationMark ||
+      code === asterisk ||
+      code === comma ||
+      code === dot ||
+      code === colon ||
+      code === questionMark ||
+      code === underscore ||
+      code === tilde
+    ) {
+      // Empty
+    } else {
+      end = index
+    }
+  }
+
+  index = end
+
+  // If the path ends in a closing paren, and the count of closing parens is
+  // higher than the opening count, then remove the supefluous closing parens.
+  if (value.charCodeAt(index - 1) === rightParenthesis) {
+    path = value.slice(pathStart, index)
+    leftCount = ccount(path, leftParenthesisCharacter)
+    rightCount = ccount(path, rightParenthesisCharacter)
+
+    while (rightCount > leftCount) {
+      index = pathStart + path.lastIndexOf(rightParenthesisCharacter)
+      path = value.slice(pathStart, index)
+      rightCount--
+    }
+  }
+
+  if (value.charCodeAt(index - 1) === semicolon) {
+    // GitHub doesn’t document this, but final semicolons aren’t paret of the
+    // URL either.
+    index--
+
+    // // If the path ends in what looks like an entity, it’s not part of the path.
+    if (alphabetical(value.charCodeAt(index - 1))) {
+      end = index - 2
+
+      while (alphabetical(value.charCodeAt(end))) {
+        end--
+      }
+
+      if (value.charCodeAt(end) === ampersand) {
+        index = end
+      }
+    }
+  }
+
+  content = value.slice(0, index)
+  url = decode(content, {nonTerminated: false})
+
+  if (protocolless) {
+    url = 'http://' + url
+  }
+
   exit = self.enterLink()
 
   // Temporarily remove all tokenizers except text in url.
-  tokenizers = self.inlineTokenizers
   self.inlineTokenizers = {text: tokenizers.text}
-
-  content = self.tokenizeInline(content, eat.now())
-
+  children = self.tokenizeInline(content, eat.now())
   self.inlineTokenizers = tokenizers
+
   exit()
 
-  return eat(subvalue)({
-    type: 'link',
-    title: null,
-    url: decode(subvalue, {nonTerminated: false}),
-    children: content
-  })
+  return eat(content)({type: 'link', title: null, url: url, children: children})
 }
 
 
@@ -19623,7 +21831,45 @@ module.exports = {
 
 /***/ }),
 /* 354 */,
-/* 355 */,
+/* 355 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var toString = __webpack_require__(419)
+var modifyChildren = __webpack_require__(918)
+var expressions = __webpack_require__(356)
+
+module.exports = modifyChildren(mergeInitialDigitSentences)
+
+// Initial lowercase letter.
+var digit = expressions.digitStart
+
+// Merge a sentence into its previous sentence, when the sentence starts with a
+// lower case letter.
+function mergeInitialDigitSentences(child, index, parent) {
+  var children = child.children
+  var siblings = parent.children
+  var prev = siblings[index - 1]
+  var head = children[0]
+
+  if (prev && head && head.type === 'WordNode' && digit.test(toString(head))) {
+    prev.children = prev.children.concat(children)
+    siblings.splice(index, 1)
+
+    // Update position.
+    if (prev.position && child.position) {
+      prev.position.end = child.position.end
+    }
+
+    // Next, iterate over the node *now* at the current position.
+    return index
+  }
+}
+
+
+/***/ }),
 /* 356 */
 /***/ (function(module) {
 
@@ -19717,7 +21963,23 @@ function locate(value, fromIndex) {
 /* 367 */,
 /* 368 */,
 /* 369 */,
-/* 370 */,
+/* 370 */
+/***/ (function(module) {
+
+"use strict";
+
+module.exports = string => {
+	const match = string.match(/^[ \t]*(?=\S)/gm);
+
+	if (!match) {
+		return 0;
+	}
+
+	return match.reduce((r, a) => Math.min(r, a.length), Infinity);
+};
+
+
+/***/ }),
 /* 371 */,
 /* 372 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -19746,7 +22008,7 @@ function strong(eat, value, silent) {
   var queue
   var subvalue
   var length
-  var prev
+  var previous
 
   if (
     (character !== asterisk && character !== underscore) ||
@@ -19768,13 +22030,13 @@ function strong(eat, value, silent) {
   }
 
   while (index < length) {
-    prev = character
+    previous = character
     character = value.charAt(index)
 
     if (
       character === marker &&
       value.charAt(index + 1) === marker &&
-      (!pedantic || !whitespace(prev))
+      (!pedantic || !whitespace(previous))
     ) {
       character = value.charAt(index + 2)
 
@@ -20113,7 +22375,7 @@ exports.Path = Path;
 /* 384 */
 /***/ (function(module) {
 
-module.exports = {"abbo":1,"abeed":2,"abid":1,"abo":1,"abortion":1,"abuse":1,"addict":1,"addicts":1,"adult":0,"africa":0,"african":0,"africoon":2,"alla":1,"allah":0,"alligator bait":2,"alligatorbait":2,"amateur":0,"american":0,"anal":1,"analannie":2,"analsex":1,"angie":0,"angry":0,"anus":1,"arab":0,"arabs":0,"arabush":2,"arabushs":2,"areola":1,"argie":2,"armo":2,"armos":2,"aroused":0,"arse":2,"arsehole":2,"asian":0,"ass":2,"assassin":0,"assassinate":0,"assassination":0,"assault":0,"assbagger":2,"assblaster":2,"assclown":2,"asscowboy":2,"asses":2,"assfuck":2,"assfucker":2,"asshat":2,"asshole":2,"assholes":2,"asshore":2,"assjockey":2,"asskiss":2,"asskisser":2,"assklown":2,"asslick":2,"asslicker":2,"asslover":2,"assman":2,"assmonkey":2,"assmunch":2,"assmuncher":2,"asspacker":2,"asspirate":2,"asspuppies":2,"assranger":2,"asswhore":2,"asswipe":2,"athletesfoot":1,"attack":0,"australian":0,"babe":1,"babies":0,"backdoor":0,"backdoorman":2,"backseat":0,"badfuck":2,"balllicker":2,"balls":1,"ballsack":1,"banana":0,"bananas":0,"banging":1,"baptist":0,"barelylegal":2,"barf":2,"barface":2,"barfface":2,"bast":0,"bastard":1,"bazongas":2,"bazooms":2,"beanbag":2,"beanbags":2,"beaner":2,"beaners":2,"beaney":2,"beaneys":2,"beast":0,"beastality":1,"beastial":1,"beastiality":1,"beatoff":2,"beatyourmeat":2,"beaver":0,"bestial":1,"bestiality":1,"bi":0,"biatch":2,"bible":0,"bicurious":1,"bigass":2,"bigbastard":2,"bigbutt":2,"bigger":0,"bisexual":0,"bitch":1,"bitcher":2,"bitches":1,"bitchez":2,"bitchin":2,"bitching":2,"bitchslap":2,"bitchy":2,"biteme":2,"black":0,"blackman":1,"blackout":0,"blacks":1,"blind":0,"blow":0,"blowjob":2,"bluegum":2,"bluegums":2,"boang":2,"boche":2,"boches":2,"bogan":2,"bohunk":2,"bollick":2,"bollock":2,"bollocks":2,"bomb":0,"bombers":0,"bombing":0,"bombs":0,"bomd":0,"bondage":1,"boner":2,"bong":2,"boob":1,"boobies":2,"boobs":1,"booby":2,"boody":2,"boom":0,"boong":2,"boonga":2,"boongas":2,"boongs":2,"boonie":2,"boonies":2,"bootlip":2,"bootlips":2,"booty":2,"bootycall":2,"bosch":0,"bosche":2,"bosches":2,"boschs":2,"bounty bar":1,"bounty bars":1,"bountybar":1,"bra":0,"brea5t":2,"breast":0,"breastjob":2,"breastlover":2,"breastman":2,"brothel":1,"brownie":0,"brownies":0,"buddhahead":2,"buddhaheads":2,"buffies":2,"buffy":0,"bugger":2,"buggered":2,"buggery":2,"bule":2,"bules":2,"bullcrap":2,"bulldike":2,"bulldyke":2,"bullshit":2,"bumblefuck":2,"bumfuck":2,"bung":2,"bunga":2,"bungas":2,"bunghole":2,"buried":0,"burn":0,"burr head":2,"burr heads":2,"burrhead":2,"burrheads":2,"butchbabes":2,"butchdike":2,"butchdyke":2,"butt":0,"buttbang":2,"buttface":2,"buttfuck":2,"buttfucker":2,"buttfuckers":2,"butthead":2,"buttman":2,"buttmunch":2,"buttmuncher":2,"buttpirate":2,"buttplug":1,"buttstain":2,"byatch":2,"cacker":2,"camel jockey":2,"camel jockeys":2,"cameljockey":2,"cameltoe":2,"canadian":0,"cancer":0,"carpetmuncher":2,"carruth":2,"catholic":0,"catholics":0,"cemetery":0,"chav":2,"cheese eating surrender monkey":2,"cheese eating surrender monkies":2,"cheeseeating surrender monkey":2,"cheeseeating surrender monkies":2,"cheesehead":2,"cheeseheads":2,"cherrypopper":2,"chickslick":2,"childrens":0,"chin":0,"china swede":2,"china swedes":2,"chinaman":2,"chinamen":2,"chinaswede":2,"chinaswedes":2,"chinese":0,"ching chong":2,"ching chongs":2,"chingchong":2,"chingchongs":2,"chink":2,"chinks":2,"chinky":2,"choad":2,"chode":2,"chonkies":2,"chonky":2,"chonkys":2,"christ":0,"christ killer":2,"christ killers":2,"christian":0,"chug":2,"chugs":2,"chunger":2,"chungers":2,"chunkies":2,"chunky":2,"chunkys":2,"church":0,"cigarette":0,"cigs":0,"clamdigger":2,"clamdiver":2,"clansman":2,"clansmen":2,"clanswoman":2,"clanswomen":2,"clit":1,"clitoris":1,"clogwog":2,"cocaine":1,"cock":1,"cockblock":2,"cockblocker":2,"cockcowboy":2,"cockfight":2,"cockhead":2,"cockknob":2,"cocklicker":2,"cocklover":2,"cocknob":2,"cockqueen":2,"cockrider":2,"cocksman":2,"cocksmith":2,"cocksmoker":2,"cocksucer":2,"cocksuck":2,"cocksucked":2,"cocksucker":2,"cocksucking":2,"cocktail":0,"cocktease":2,"cocky":2,"coconut":0,"coconuts":0,"cohee":2,"coitus":1,"color":0,"colored":0,"coloured":0,"commie":2,"communist":0,"condom":1,"conservative":0,"conspiracy":0,"coolie":2,"coolies":2,"cooly":2,"coon":2,"coon ass":2,"coon asses":2,"coonass":2,"coonasses":2,"coondog":2,"coons":2,"copulate":1,"cornhole":2,"corruption":0,"cra5h":1,"crabs":0,"crack":1,"cracka":2,"cracker":1,"crackpipe":1,"crackwhore":2,"crap":2,"crapola":2,"crapper":2,"crappy":2,"crash":0,"creamy":0,"crime":0,"crimes":0,"criminal":0,"criminals":0,"crotch":1,"crotchjockey":2,"crotchmonkey":2,"crotchrot":2,"cum":2,"cumbubble":2,"cumfest":2,"cumjockey":2,"cumm":2,"cummer":2,"cumming":2,"cummings":1,"cumquat":2,"cumqueen":2,"cumshot":2,"cunilingus":1,"cunillingus":1,"cunn":2,"cunnilingus":1,"cunntt":2,"cunt":2,"cunteyed":2,"cuntfuck":2,"cuntfucker":2,"cuntlick":2,"cuntlicker":2,"cuntlicking":2,"cuntsucker":2,"curry muncher":2,"curry munchers":2,"currymuncher":2,"currymunchers":2,"cushi":2,"cushis":2,"cybersex":1,"cyberslimer":2,"dago":2,"dagos":2,"dahmer":2,"dammit":2,"damn":1,"damnation":1,"damnit":2,"darkey":2,"darkeys":2,"darkie":2,"darkies":2,"darky":2,"datnigga":2,"dead":0,"deapthroat":2,"death":0,"deepthroat":2,"defecate":1,"dego":2,"degos":2,"demon":1,"deposit":0,"desire":0,"destroy":0,"deth":0,"devil":1,"devilworshipper":1,"diaper head":2,"diaper heads":2,"diaperhead":2,"diaperheads":2,"dick":1,"dickbrain":2,"dickforbrains":2,"dickhead":2,"dickless":2,"dicklick":2,"dicklicker":2,"dickman":2,"dickwad":2,"dickweed":2,"diddle":2,"die":0,"died":0,"dies":0,"dike":1,"dildo":1,"dingleberry":2,"dink":2,"dinks":2,"dipshit":2,"dipstick":2,"dirty":0,"disease":0,"diseases":0,"disturbed":0,"dive":0,"dix":2,"dixiedike":2,"dixiedyke":2,"doggiestyle":2,"doggystyle":2,"dong":2,"doodoo":2,"doom":0,"dope":2,"dot head":2,"dot heads":2,"dothead":2,"dotheads":2,"dragqueen":2,"dragqween":2,"dripdick":2,"drug":1,"drunk":1,"drunken":1,"dumb":2,"dumbass":2,"dumbbitch":2,"dumbfuck":2,"dune coon":2,"dune coons":2,"dyefly":2,"dyke":1,"easyslut":2,"eatballs":2,"eatme":2,"eatpussy":2,"ecstacy":0,"eight ball":2,"eight balls":2,"ejaculate":1,"ejaculated":1,"ejaculating":1,"ejaculation":1,"enema":1,"enemy":0,"erect":0,"erection":1,"ero":2,"escort":0,"esqua":2,"ethiopian":0,"ethnic":0,"european":0,"evl":2,"excrement":1,"execute":0,"executed":0,"execution":0,"executioner":0,"exkwew":2,"explosion":0,"facefucker":2,"faeces":2,"fag":1,"fagging":2,"faggot":2,"fagot":2,"failed":0,"failure":0,"fairies":0,"fairy":0,"faith":0,"fannyfucker":2,"fart":1,"farted":1,"farting":1,"farty":2,"fastfuck":2,"fat":0,"fatah":2,"fatass":2,"fatfuck":2,"fatfucker":2,"fatso":2,"fckcum":2,"fear":0,"feces":1,"felatio":1,"felch":2,"felcher":2,"felching":2,"fellatio":2,"feltch":2,"feltcher":2,"feltching":2,"fetish":1,"fight":0,"filipina":0,"filipino":0,"fingerfood":1,"fingerfuck":2,"fingerfucked":2,"fingerfucker":2,"fingerfuckers":2,"fingerfucking":2,"fire":0,"firing":0,"fister":2,"fistfuck":2,"fistfucked":2,"fistfucker":2,"fistfucking":2,"fisting":2,"flange":2,"flasher":1,"flatulence":1,"floo":2,"flydie":2,"flydye":2,"fok":2,"fondle":1,"footaction":1,"footfuck":2,"footfucker":2,"footlicker":2,"footstar":2,"fore":0,"foreskin":1,"forni":2,"fornicate":1,"foursome":1,"fourtwenty":1,"fraud":0,"freakfuck":2,"freakyfucker":2,"freefuck":2,"fruitcake":1,"fu":2,"fubar":2,"fuc":2,"fucck":2,"fuck":2,"fucka":2,"fuckable":2,"fuckbag":2,"fuckbook":2,"fuckbuddy":2,"fucked":2,"fuckedup":2,"fucker":2,"fuckers":2,"fuckface":2,"fuckfest":2,"fuckfreak":2,"fuckfriend":2,"fuckhead":2,"fuckher":2,"fuckin":2,"fuckina":2,"fucking":2,"fuckingbitch":2,"fuckinnuts":2,"fuckinright":2,"fuckit":2,"fuckknob":2,"fuckme":2,"fuckmehard":2,"fuckmonkey":2,"fuckoff":2,"fuckpig":2,"fucks":2,"fucktard":2,"fuckwhore":2,"fuckyou":2,"fudgepacker":2,"fugly":2,"fuk":2,"fuks":2,"funeral":0,"funfuck":2,"fungus":0,"fuuck":2,"gable":1,"gables":2,"gangbang":2,"gangbanged":2,"gangbanger":2,"gangsta":2,"gator bait":2,"gatorbait":2,"gay":0,"gaymuthafuckinwhore":2,"gaysex":2,"geez":2,"geezer":2,"geni":2,"genital":1,"german":0,"getiton":2,"gin":0,"ginzo":2,"ginzos":2,"gipp":2,"gippo":2,"gippos":2,"gipps":2,"girls":0,"givehead":2,"glazeddonut":2,"gob":1,"god":1,"godammit":2,"goddamit":2,"goddammit":2,"goddamn":2,"goddamned":2,"goddamnes":2,"goddamnit":2,"goddamnmuthafucker":2,"goldenshower":2,"golliwog":2,"golliwogs":2,"gonorrehea":2,"gonzagas":1,"gook":2,"gook eye":2,"gook eyes":2,"gookeye":2,"gookeyes":2,"gookies":2,"gooks":2,"gooky":2,"gora":2,"goras":2,"gotohell":2,"goy":1,"goyim":1,"greaseball":2,"greaseballs":2,"greaser":2,"greasers":2,"gringo":2,"gringos":2,"groe":1,"groid":2,"groids":2,"gross":1,"grostulation":1,"gub":1,"gubba":2,"gubbas":2,"gubs":2,"guinea":1,"guineas":1,"guizi":1,"gummer":2,"gun":0,"gwailo":2,"gwailos":2,"gweilo":2,"gweilos":2,"gyopo":2,"gyopos":2,"gyp":2,"gyped":2,"gypo":2,"gypos":2,"gypp":2,"gypped":2,"gyppie":2,"gyppies":2,"gyppo":2,"gyppos":2,"gyppy":2,"gyppys":2,"gypsies":2,"gypsy":2,"gypsys":2,"hadji":2,"hadjis":2,"hairyback":2,"hairybacks":2,"haji":2,"hajis":2,"hajji":2,"hajjis":2,"half breed":2,"half caste":2,"halfbreed":2,"halfcaste":2,"hamas":1,"handjob":2,"haole":2,"haoles":2,"hapa":2,"harder":0,"hardon":2,"harem":0,"headfuck":2,"headlights":0,"hebe":2,"hebephila":1,"hebephile":1,"hebephiles":1,"hebephilia":1,"hebephilic":1,"hebes":2,"heeb":2,"heebs":2,"hell":0,"henhouse":0,"heroin":1,"herpes":1,"heterosexual":0,"hijack":0,"hijacker":0,"hijacking":0,"hillbillies":2,"hillbilly":2,"hindoo":2,"hiscock":2,"hitler":1,"hitlerism":2,"hitlerist":2,"hiv":1,"ho":2,"hobo":2,"hodgie":2,"hoes":2,"hole":0,"holestuffer":2,"homicide":1,"homo":2,"homobangers":2,"homosexual":1,"honger":2,"honk":0,"honkers":2,"honkey":2,"honkeys":2,"honkie":2,"honkies":2,"honky":2,"hook":0,"hooker":2,"hookers":2,"hooters":2,"hore":2,"hori":2,"horis":2,"hork":2,"horn":0,"horney":2,"horniest":2,"horny":1,"horseshit":2,"hosejob":2,"hoser":2,"hostage":0,"hotdamn":2,"hotpussy":2,"hottotrot":2,"hummer":0,"hun":0,"huns":0,"husky":0,"hussy":2,"hustler":0,"hymen":1,"hymie":2,"hymies":2,"iblowu":2,"idiot":2,"ike":1,"ikes":1,"ikey":1,"ikeymo":2,"ikeymos":2,"ikwe":2,"illegal":0,"illegals":1,"incest":1,"indon":2,"indons":2,"injun":2,"injuns":2,"insest":2,"intercourse":1,"interracial":1,"intheass":2,"inthebuff":2,"israel":0,"israeli":0,"israels":0,"italiano":1,"itch":0,"jackass":2,"jackoff":2,"jackshit":2,"jacktheripper":2,"jade":0,"jap":2,"japanese":0,"japcrap":2,"japie":2,"japies":2,"japs":2,"jebus":2,"jeez":2,"jerkoff":2,"jerries":1,"jerry":0,"jesus":1,"jesuschrist":1,"jew":0,"jewed":2,"jewess":2,"jewish":0,"jig":2,"jiga":2,"jigaboo":2,"jigaboos":2,"jigarooni":2,"jigaroonis":2,"jigg":2,"jigga":2,"jiggabo":2,"jiggabos":2,"jiggas":2,"jigger":2,"jiggers":2,"jiggs":2,"jiggy":2,"jigs":2,"jihad":1,"jijjiboo":2,"jijjiboos":2,"jimfish":2,"jism":2,"jiz":2,"jizim":2,"jizjuice":2,"jizm":2,"jizz":2,"jizzim":2,"jizzum":2,"joint":0,"juggalo":2,"jugs":0,"jungle bunnies":2,"jungle bunny":2,"junglebunny":2,"kacap":2,"kacapas":2,"kacaps":2,"kaffer":2,"kaffir":2,"kaffre":2,"kafir":2,"kanake":2,"katsap":2,"katsaps":2,"khokhol":2,"khokhols":2,"kid":0,"kigger":2,"kike":2,"kikes":2,"kill":0,"killed":0,"killer":0,"killing":0,"kills":0,"kimchi":0,"kimchis":2,"kink":1,"kinky":1,"kissass":2,"kkk":2,"klansman":2,"klansmen":2,"klanswoman":2,"klanswomen":2,"knife":0,"knockers":1,"kock":1,"kondum":2,"koon":2,"kotex":1,"krap":2,"krappy":2,"kraut":1,"krauts":2,"kuffar":2,"kum":2,"kumbubble":2,"kumbullbe":2,"kummer":2,"kumming":2,"kumquat":2,"kums":2,"kunilingus":2,"kunnilingus":2,"kunt":2,"kushi":2,"kushis":2,"kwa":2,"kwai lo":2,"kwai los":2,"ky":1,"kyke":2,"kykes":2,"kyopo":2,"kyopos":2,"lactate":1,"laid":0,"lapdance":1,"latin":0,"lebo":2,"lebos":2,"lesbain":2,"lesbayn":2,"lesbian":0,"lesbin":2,"lesbo":2,"lez":2,"lezbe":2,"lezbefriends":2,"lezbo":2,"lezz":2,"lezzo":2,"liberal":0,"libido":1,"licker":1,"lickme":2,"lies":0,"limey":2,"limpdick":2,"limy":2,"lingerie":0,"liquor":1,"livesex":2,"loadedgun":2,"lolita":1,"looser":2,"loser":2,"lotion":0,"lovebone":2,"lovegoo":2,"lovegun":2,"lovejuice":2,"lovemuscle":2,"lovepistol":2,"loverocket":2,"lowlife":2,"lsd":1,"lubejob":2,"lubra":2,"lucifer":0,"luckycammeltoe":2,"lugan":2,"lugans":2,"lynch":1,"mabuno":2,"mabunos":2,"macaca":2,"macacas":2,"mad":0,"mafia":1,"magicwand":2,"mahbuno":2,"mahbunos":2,"mams":2,"manhater":2,"manpaste":2,"marijuana":1,"mastabate":2,"mastabater":2,"masterbate":2,"masterblaster":2,"mastrabator":2,"masturbate":2,"masturbating":2,"mattressprincess":2,"mau mau":2,"mau maus":2,"maumau":2,"maumaus":2,"meatbeatter":2,"meatrack":2,"meth":1,"mexican":0,"mgger":2,"mggor":2,"mick":1,"mickeyfinn":2,"mideast":0,"milf":2,"minority":0,"mockey":2,"mockie":2,"mocky":2,"mofo":2,"moky":2,"moles":0,"molest":1,"molestation":1,"molester":1,"molestor":1,"moneyshot":2,"moon cricket":2,"moon crickets":2,"mooncricket":2,"mooncrickets":2,"mormon":0,"moron":2,"moskal":2,"moskals":2,"moslem":2,"mosshead":2,"mothafuck":2,"mothafucka":2,"mothafuckaz":2,"mothafucked":2,"mothafucker":2,"mothafuckin":2,"mothafucking":2,"mothafuckings":2,"motherfuck":2,"motherfucked":2,"motherfucker":2,"motherfuckin":2,"motherfucking":2,"motherfuckings":2,"motherlovebone":2,"muff":2,"muffdive":2,"muffdiver":2,"muffindiver":2,"mufflikcer":2,"mulatto":2,"muncher":2,"munt":2,"murder":1,"murderer":1,"muslim":0,"mzungu":2,"mzungus":2,"naked":0,"narcotic":1,"nasty":0,"nastybitch":2,"nastyho":2,"nastyslut":2,"nastywhore":2,"nazi":1,"necro":1,"negres":2,"negress":2,"negro":2,"negroes":2,"negroid":2,"negros":2,"nig":2,"nigar":2,"nigars":2,"niger":0,"nigerian":1,"nigerians":1,"nigers":2,"nigette":2,"nigettes":2,"nigg":2,"nigga":2,"niggah":2,"niggahs":2,"niggar":2,"niggaracci":2,"niggard":2,"niggarded":2,"niggarding":2,"niggardliness":2,"niggardlinesss":2,"niggardly":0,"niggards":2,"niggars":2,"niggas":2,"niggaz":2,"nigger":2,"niggerhead":2,"niggerhole":2,"niggers":2,"niggle":2,"niggled":2,"niggles":2,"niggling":2,"nigglings":2,"niggor":2,"niggress":2,"niggresses":2,"nigguh":2,"nigguhs":2,"niggur":2,"niggurs":2,"niglet":2,"nignog":2,"nigor":2,"nigors":2,"nigr":2,"nigra":2,"nigras":2,"nigre":2,"nigres":2,"nigress":2,"nigs":2,"nip":2,"nipple":1,"nipplering":1,"nittit":2,"nlgger":2,"nlggor":2,"nofuckingway":2,"nook":1,"nookey":2,"nookie":2,"noonan":2,"nooner":1,"nude":1,"nudger":2,"nuke":1,"nutfucker":2,"nymph":1,"ontherag":2,"oral":1,"oreo":0,"oreos":0,"orga":2,"orgasim":2,"orgasm":1,"orgies":1,"orgy":1,"osama":0,"paddy":1,"paederastic":1,"paederasts":1,"paederasty":1,"paki":2,"pakis":2,"palesimian":2,"palestinian":0,"pancake face":2,"pancake faces":2,"pansies":2,"pansy":2,"panti":2,"panties":0,"payo":2,"pearlnecklace":1,"peck":1,"pecker":1,"peckerwood":2,"pederastic":1,"pederasts":1,"pederasty":1,"pedo":2,"pedophile":1,"pedophiles":1,"pedophilia":1,"pedophilic":1,"pee":1,"peehole":2,"peepee":2,"peepshow":1,"peepshpw":2,"pendy":1,"penetration":1,"peni5":2,"penile":1,"penis":1,"penises":1,"penthouse":0,"period":0,"perv":2,"phonesex":1,"phuk":2,"phuked":2,"phuking":2,"phukked":2,"phukking":2,"phungky":2,"phuq":2,"pi55":2,"picaninny":2,"piccaninny":2,"pickaninnies":2,"pickaninny":2,"piefke":2,"piefkes":2,"piker":2,"pikey":2,"piky":2,"pimp":2,"pimped":2,"pimper":2,"pimpjuic":2,"pimpjuice":2,"pimpsimp":2,"pindick":2,"piss":2,"pissed":2,"pisser":2,"pisses":2,"pisshead":2,"pissin":2,"pissing":2,"pissoff":2,"pistol":1,"pixie":1,"pixy":1,"playboy":1,"playgirl":1,"pocha":2,"pochas":2,"pocho":2,"pochos":2,"pocketpool":2,"pohm":2,"pohms":2,"polack":2,"polacks":2,"pollock":2,"pollocks":2,"pom":2,"pommie":2,"pommie grant":2,"pommie grants":2,"pommies":2,"pommy":2,"poms":2,"poo":2,"poon":2,"poontang":2,"poop":2,"pooper":2,"pooperscooper":2,"pooping":2,"poorwhitetrash":2,"popimp":2,"porch monkey":2,"porch monkies":2,"porchmonkey":2,"porn":1,"pornflick":1,"pornking":2,"porno":1,"pornography":1,"pornprincess":2,"pot":0,"poverty":0,"prairie nigger":2,"prairie niggers":2,"premature":0,"pric":2,"prick":2,"prickhead":2,"primetime":0,"propaganda":0,"pros":0,"prostitute":1,"protestant":1,"pu55i":2,"pu55y":2,"pube":1,"pubic":1,"pubiclice":2,"pud":2,"pudboy":2,"pudd":2,"puddboy":2,"puke":2,"puntang":2,"purinapricness":2,"puss":2,"pussie":2,"pussies":2,"pussy":1,"pussycat":1,"pussyeater":2,"pussyfucker":2,"pussylicker":2,"pussylips":2,"pussylover":2,"pussypounder":2,"pusy":2,"quashie":2,"que":0,"queef":2,"queer":1,"quickie":2,"quim":2,"ra8s":2,"rabbi":0,"racial":0,"racist":1,"radical":1,"radicals":1,"raghead":2,"ragheads":2,"randy":1,"rape":1,"raped":1,"raper":2,"rapist":1,"rearend":2,"rearentry":2,"rectum":1,"redleg":2,"redlegs":2,"redlight":0,"redneck":2,"rednecks":2,"redskin":2,"redskins":2,"reefer":2,"reestie":2,"refugee":0,"reject":0,"remains":0,"rentafuck":2,"republican":0,"rere":2,"retard":2,"retarded":2,"ribbed":1,"rigger":2,"rimjob":2,"rimming":2,"roach":0,"robber":0,"round eyes":2,"roundeye":2,"rump":0,"russki":2,"russkie":2,"sadis":2,"sadom":2,"sambo":2,"sambos":2,"samckdaddy":2,"sand nigger":2,"sand niggers":2,"sandm":2,"sandnigger":2,"satan":1,"scag":1,"scallywag":2,"scat":1,"schlong":2,"schvartse":2,"schvartsen":2,"schwartze":2,"schwartzen":2,"screw":1,"screwyou":2,"scrotum":1,"scum":1,"semen":1,"seppo":2,"seppos":2,"septic":1,"septics":1,"servant":0,"sex":1,"sexed":2,"sexfarm":2,"sexhound":2,"sexhouse":1,"sexing":2,"sexkitten":2,"sexpot":2,"sexslave":2,"sextogo":2,"sextoy":1,"sextoys":1,"sexual":1,"sexually":1,"sexwhore":2,"sexy":1,"sexymoma":2,"sexyslim":2,"shag":1,"shaggin":2,"shagging":2,"shat":2,"shav":2,"shawtypimp":2,"sheeney":2,"shhit":2,"shinola":1,"shit":1,"shitcan":2,"shitdick":2,"shite":2,"shiteater":2,"shited":2,"shitface":2,"shitfaced":2,"shitfit":2,"shitforbrains":2,"shitfuck":2,"shitfucker":2,"shitfull":2,"shithapens":2,"shithappens":2,"shithead":2,"shithouse":2,"shiting":2,"shitlist":2,"shitola":2,"shitoutofluck":2,"shits":2,"shitstain":2,"shitted":2,"shitter":2,"shitting":2,"shitty":2,"shoot":0,"shooting":0,"shortfuck":2,"showtime":0,"shylock":2,"shylocks":2,"sick":0,"sissy":2,"sixsixsix":2,"sixtynine":2,"sixtyniner":2,"skank":2,"skankbitch":2,"skankfuck":2,"skankwhore":2,"skanky":2,"skankybitch":2,"skankywhore":2,"skinflute":2,"skum":2,"skumbag":2,"skwa":2,"skwe":2,"slant":0,"slanteye":2,"slanty":2,"slapper":2,"slaughter":1,"slav":2,"slave":2,"slavedriver":2,"sleezebag":2,"sleezeball":2,"slideitin":2,"slime":0,"slimeball":2,"slimebucket":2,"slope":0,"slopehead":2,"slopeheads":2,"sloper":2,"slopers":2,"slopes":0,"slopey":2,"slopeys":2,"slopies":2,"slopy":2,"slut":2,"sluts":2,"slutt":2,"slutting":2,"slutty":2,"slutwear":2,"slutwhore":2,"smack":1,"smackthemonkey":2,"smut":2,"snatch":1,"snatchpatch":2,"snigger":0,"sniggered":0,"sniggering":0,"sniggers":1,"sniper":0,"snot":0,"snowback":2,"snownigger":2,"sob":0,"sodom":1,"sodomise":2,"sodomite":1,"sodomize":2,"sodomy":2,"sonofabitch":2,"sonofbitch":2,"sooties":2,"sooty":2,"sos":0,"soviet":0,"spa":0,"spade":1,"spades":1,"spaghettibender":2,"spaghettinigger":2,"spank":1,"spankthemonkey":2,"spearchucker":2,"spearchuckers":2,"sperm":1,"spermacide":2,"spermbag":2,"spermhearder":2,"spermherder":2,"spic":2,"spick":2,"spicks":2,"spics":2,"spig":2,"spigotty":2,"spik":2,"spit":2,"spitter":2,"splittail":2,"spooge":2,"spreadeagle":2,"spunk":2,"spunky":2,"sqeh":2,"squa":2,"squarehead":2,"squareheads":2,"squaw":2,"squinty":2,"stagg":1,"stiffy":1,"strapon":1,"stringer":2,"stripclub":2,"stroke":0,"stroking":1,"stuinties":2,"stupid":2,"stupidfuck":2,"stupidfucker":2,"suck":1,"suckdick":2,"sucker":2,"suckme":2,"suckmyass":2,"suckmydick":2,"suckmytit":2,"suckoff":2,"suicide":1,"swallow":1,"swallower":2,"swalow":2,"swamp guinea":2,"swamp guineas":2,"swastika":1,"sweetness":0,"syphilis":1,"taboo":0,"tacohead":2,"tacoheads":2,"taff":2,"tampon":0,"tang":2,"tantra":1,"tar babies":2,"tar baby":2,"tarbaby":2,"tard":2,"teat":1,"terror":0,"terrorist":1,"teste":2,"testicle":1,"testicles":1,"thicklip":2,"thicklips":2,"thirdeye":2,"thirdleg":2,"threesome":1,"threeway":2,"timber nigger":2,"timber niggers":2,"timbernigger":2,"tinker":2,"tinkers":2,"tinkle":1,"tit":1,"titbitnipply":2,"titfuck":2,"titfucker":2,"titfuckin":2,"titjob":2,"titlicker":2,"titlover":2,"tits":1,"tittie":2,"titties":2,"titty":2,"tnt":1,"toilet":0,"tongethruster":2,"tongue":0,"tonguethrust":2,"tonguetramp":2,"tortur":2,"torture":1,"tosser":2,"towel head":2,"towel heads":2,"towelhead":2,"trailertrash":2,"tramp":1,"trannie":2,"tranny":2,"transexual":0,"transsexual":0,"transvestite":2,"trap":1,"triplex":2,"trisexual":1,"trojan":0,"trots":1,"tuckahoe":2,"tunneloflove":2,"turd":1,"turnon":2,"twat":2,"twink":2,"twinkie":2,"twobitwhore":2,"uck":2,"uk":0,"ukrop":2,"uncle tom":2,"unfuckable":2,"upskirt":2,"uptheass":2,"upthebutt":2,"urinary":0,"urinate":0,"urine":0,"usama":2,"uterus":1,"vagina":1,"vaginal":1,"vatican":0,"vibr":2,"vibrater":2,"vibrator":1,"vietcong":0,"violence":0,"virgin":0,"virginbreaker":2,"vomit":2,"vulva":1,"wab":2,"wank":2,"wanker":2,"wanking":2,"waysted":2,"weapon":0,"weenie":2,"weewee":2,"welcher":2,"welfare":2,"wetb":2,"wetback":2,"wetbacks":2,"wetspot":2,"whacker":2,"whash":2,"whigger":2,"whiggers":2,"whiskey":0,"whiskeydick":2,"whiskydick":2,"whit":1,"white trash":2,"whitenigger":2,"whites":1,"whitetrash":2,"whitey":2,"whiteys":2,"whities":2,"whiz":2,"whop":2,"whore":2,"whorefucker":2,"whorehouse":2,"wigga":2,"wiggas":2,"wigger":2,"wiggers":2,"willie":2,"williewanker":2,"willy":1,"wn":2,"wog":2,"wogs":2,"womens":0,"wop":2,"wtf":2,"wuss":2,"wuzzie":2,"xkwe":2,"xtc":1,"xxx":1,"yank":2,"yankee":1,"yankees":1,"yanks":2,"yarpie":2,"yarpies":2,"yellowman":2,"yid":2,"yids":2,"zigabo":2,"zigabos":2,"zipperhead":2,"zipperheads":2};
+module.exports = {"abbo":1,"abeed":2,"abid":1,"abo":1,"abortion":1,"abuse":1,"addict":1,"addicts":1,"adult":0,"africa":0,"african":0,"africoon":2,"alla":1,"allah":0,"alligator bait":2,"alligatorbait":2,"amateur":0,"american":0,"anal":1,"analannie":2,"analsex":1,"angie":0,"angry":0,"anus":1,"arab":0,"arabs":0,"arabush":2,"arabushs":2,"areola":1,"argie":2,"armo":2,"armos":2,"aroused":0,"arse":2,"arsehole":2,"asian":0,"ass":2,"assassin":0,"assassinate":0,"assassination":0,"assault":0,"assbagger":2,"assblaster":2,"assclown":2,"asscowboy":2,"asses":2,"assfuck":2,"assfucker":2,"asshat":2,"asshole":2,"assholes":2,"asshore":2,"assjockey":2,"asskiss":2,"asskisser":2,"assklown":2,"asslick":2,"asslicker":2,"asslover":2,"assman":2,"assmonkey":2,"assmunch":2,"assmuncher":2,"asspacker":2,"asspirate":2,"asspuppies":2,"assranger":2,"asswhore":2,"asswipe":2,"athletesfoot":1,"attack":0,"australian":0,"babe":1,"babies":0,"backdoor":0,"backdoorman":2,"backseat":0,"badfuck":2,"balllicker":2,"balls":1,"ballsack":1,"banana":0,"bananas":0,"banging":1,"baptist":0,"barelylegal":2,"barf":2,"barface":2,"barfface":2,"bast":0,"bastard":1,"bazongas":2,"bazooms":2,"beanbag":2,"beanbags":2,"beaner":2,"beaners":2,"beaney":2,"beaneys":2,"beast":0,"beastality":1,"beastial":1,"beastiality":1,"beatoff":2,"beatyourmeat":2,"beaver":0,"bestial":1,"bestiality":1,"bi":0,"biatch":2,"bible":0,"bicurious":1,"bigass":2,"bigbastard":2,"bigbutt":2,"bigger":0,"bisexual":0,"bitch":1,"bitcher":2,"bitches":1,"bitchez":2,"bitchin":2,"bitching":2,"bitchslap":2,"bitchy":2,"biteme":2,"black":0,"blackman":1,"blackout":0,"blacks":1,"blind":0,"blow":0,"blowjob":2,"bluegum":2,"bluegums":2,"boang":2,"boche":2,"boches":2,"bogan":2,"bohunk":2,"bollick":2,"bollock":2,"bollocks":2,"bomb":0,"bombers":0,"bombing":0,"bombs":0,"bomd":0,"bondage":1,"boner":2,"bong":2,"boob":1,"boobies":2,"boobs":1,"booby":2,"boody":2,"boom":0,"boong":2,"boonga":2,"boongas":2,"boongs":2,"boonie":2,"boonies":2,"bootlip":2,"bootlips":2,"booty":2,"bootycall":2,"bosch":0,"bosche":2,"bosches":2,"boschs":2,"bounty bar":1,"bounty bars":1,"bountybar":1,"bra":0,"brea5t":2,"breast":0,"breastjob":2,"breastlover":2,"breastman":2,"brothel":1,"brownie":0,"brownies":0,"buddhahead":2,"buddhaheads":2,"buffies":2,"buffy":0,"bugger":2,"buggered":2,"buggery":2,"bule":2,"bules":2,"bullcrap":2,"bulldike":2,"bulldyke":2,"bullshit":2,"bumblefuck":2,"bumfuck":2,"bung":2,"bunga":2,"bungas":2,"bunghole":2,"buried":0,"burn":0,"burr head":2,"burr heads":2,"burrhead":2,"burrheads":2,"butchbabes":2,"butchdike":2,"butchdyke":2,"butt":0,"buttbang":2,"buttface":2,"buttfuck":2,"buttfucker":2,"buttfuckers":2,"butthead":2,"buttman":2,"buttmunch":2,"buttmuncher":2,"buttpirate":2,"buttplug":1,"buttstain":2,"byatch":2,"cacker":2,"camel jockey":2,"camel jockeys":2,"cameljockey":2,"cameltoe":2,"canadian":0,"cancer":0,"carpetmuncher":2,"carruth":2,"catholic":0,"catholics":0,"cemetery":0,"chav":2,"cheese eating surrender monkey":2,"cheese eating surrender monkies":2,"cheeseeating surrender monkey":2,"cheeseeating surrender monkies":2,"cheesehead":2,"cheeseheads":2,"cherrypopper":2,"chickslick":2,"childrens":0,"chin":0,"china swede":2,"china swedes":2,"chinaman":2,"chinamen":2,"chinaswede":2,"chinaswedes":2,"chinese":0,"ching chong":2,"ching chongs":2,"chingchong":2,"chingchongs":2,"chink":2,"chinks":2,"chinky":2,"choad":2,"chode":2,"chonkies":2,"chonky":2,"chonkys":2,"christ":0,"christ killer":2,"christ killers":2,"christian":0,"chug":2,"chugs":2,"chunger":2,"chungers":2,"chunkies":2,"chunky":2,"chunkys":2,"church":0,"cigarette":0,"cigs":0,"clamdigger":2,"clamdiver":2,"clansman":2,"clansmen":2,"clanswoman":2,"clanswomen":2,"clit":1,"clitoris":1,"clogwog":2,"cocaine":1,"cock":1,"cockblock":2,"cockblocker":2,"cockcowboy":2,"cockfight":2,"cockhead":2,"cockknob":2,"cocklicker":2,"cocklover":2,"cocknob":2,"cockqueen":2,"cockrider":2,"cocksman":2,"cocksmith":2,"cocksmoker":2,"cocksucer":2,"cocksuck":2,"cocksucked":2,"cocksucker":2,"cocksucking":2,"cocktail":0,"cocktease":2,"cocky":2,"coconut":0,"coconuts":0,"cohee":2,"coitus":1,"color":0,"colored":0,"coloured":0,"commie":2,"communist":0,"condom":1,"conservative":0,"conspiracy":0,"coolie":2,"coolies":2,"cooly":2,"coon":2,"coon ass":2,"coon asses":2,"coonass":2,"coonasses":2,"coondog":2,"coons":2,"copulate":1,"cornhole":2,"corruption":0,"cra5h":1,"crabs":0,"crack":1,"cracka":2,"cracker":1,"crackpipe":1,"crackwhore":2,"crap":2,"crapola":2,"crapper":2,"crappy":2,"crash":0,"creamy":0,"crime":0,"crimes":0,"criminal":0,"criminals":0,"crotch":1,"crotchjockey":2,"crotchmonkey":2,"crotchrot":2,"cum":2,"cumbubble":2,"cumfest":2,"cumjockey":2,"cumm":2,"cummer":2,"cumming":2,"cummings":1,"cumquat":2,"cumqueen":2,"cumshot":2,"cunilingus":1,"cunillingus":1,"cunn":2,"cunnilingus":1,"cunntt":2,"cunt":2,"cunteyed":2,"cuntfuck":2,"cuntfucker":2,"cuntlick":2,"cuntlicker":2,"cuntlicking":2,"cuntsucker":2,"curry muncher":2,"curry munchers":2,"currymuncher":2,"currymunchers":2,"cushi":2,"cushis":2,"cybersex":1,"cyberslimer":2,"dago":2,"dagos":2,"dahmer":2,"dammit":2,"damn":1,"damnation":1,"damnit":2,"darkey":2,"darkeys":2,"darkie":2,"darkies":2,"darky":2,"datnigga":2,"dead":0,"deapthroat":2,"death":0,"deepthroat":2,"defecate":1,"dego":2,"degos":2,"demon":1,"deposit":0,"desire":0,"destroy":0,"deth":0,"devil":1,"devilworshipper":1,"diaper head":2,"diaper heads":2,"diaperhead":2,"diaperheads":2,"dick":1,"dickbrain":2,"dickforbrains":2,"dickhead":2,"dickless":2,"dicklick":2,"dicklicker":2,"dickman":2,"dickwad":2,"dickweed":2,"diddle":2,"die":0,"died":0,"dies":0,"dike":1,"dildo":1,"dingleberry":2,"dink":2,"dinks":2,"dipshit":2,"dipstick":2,"dirty":0,"disease":0,"diseases":0,"disturbed":0,"dive":0,"dix":2,"dixiedike":2,"dixiedyke":2,"doggiestyle":2,"doggystyle":2,"dong":2,"doodoo":2,"doom":0,"dope":2,"dot head":2,"dot heads":2,"dothead":2,"dotheads":2,"dragqueen":2,"dragqween":2,"dripdick":2,"drug":1,"drunk":1,"drunken":1,"dumb":2,"dumbass":2,"dumbbitch":2,"dumbfuck":2,"dune coon":2,"dune coons":2,"dyefly":2,"dyke":1,"easyslut":2,"eatballs":2,"eatme":2,"eatpussy":2,"ecstacy":0,"eight ball":2,"eight balls":2,"ejaculate":1,"ejaculated":1,"ejaculating":1,"ejaculation":1,"enema":1,"enemy":0,"erect":0,"erection":1,"ero":2,"escort":0,"esqua":2,"ethiopian":0,"ethnic":0,"european":0,"evl":2,"excrement":1,"execute":0,"executed":0,"execution":0,"executioner":0,"exkwew":2,"explosion":0,"facefucker":2,"faeces":2,"fag":1,"fagging":2,"faggot":2,"fagot":2,"failed":0,"failure":0,"fairies":0,"fairy":0,"faith":0,"fannyfucker":2,"fart":1,"farted":1,"farting":1,"farty":2,"fastfuck":2,"fat":0,"fatah":2,"fatass":2,"fatfuck":2,"fatfucker":2,"fatso":2,"fckcum":2,"fear":0,"feces":1,"felatio":1,"felch":2,"felcher":2,"felching":2,"fellatio":2,"feltch":2,"feltcher":2,"feltching":2,"fetish":1,"fight":0,"filipina":0,"filipino":0,"fingerfood":1,"fingerfuck":2,"fingerfucked":2,"fingerfucker":2,"fingerfuckers":2,"fingerfucking":2,"fire":0,"firing":0,"fister":2,"fistfuck":2,"fistfucked":2,"fistfucker":2,"fistfucking":2,"fisting":2,"flange":2,"flasher":1,"flatulence":1,"floo":2,"flydie":2,"flydye":2,"fok":2,"fondle":1,"footaction":1,"footfuck":2,"footfucker":2,"footlicker":2,"footstar":2,"fore":0,"foreskin":1,"forni":2,"fornicate":1,"foursome":1,"fourtwenty":1,"fraud":0,"freakfuck":2,"freakyfucker":2,"freefuck":2,"fruitcake":1,"fu":2,"fubar":2,"fuc":2,"fucck":2,"fuck":2,"fucka":2,"fuckable":2,"fuckbag":2,"fuckbook":2,"fuckbuddy":2,"fucked":2,"fuckedup":2,"fucker":2,"fuckers":2,"fuckface":2,"fuckfest":2,"fuckfreak":2,"fuckfriend":2,"fuckhead":2,"fuckher":2,"fuckin":2,"fuckina":2,"fucking":2,"fuckingbitch":2,"fuckinnuts":2,"fuckinright":2,"fuckit":2,"fuckknob":2,"fuckme":2,"fuckmehard":2,"fuckmonkey":2,"fuckoff":2,"fuckpig":2,"fucks":2,"fucktard":2,"fuckwhore":2,"fuckyou":2,"fudgepacker":2,"fugly":2,"fuk":2,"fuks":2,"funeral":0,"funfuck":2,"fungus":0,"fuuck":2,"gable":1,"gables":2,"gangbang":2,"gangbanged":2,"gangbanger":2,"gangsta":2,"gator bait":2,"gatorbait":2,"gay":0,"gaymuthafuckinwhore":2,"gaysex":2,"geez":2,"geezer":2,"geni":2,"genital":1,"german":0,"getiton":2,"gin":0,"ginzo":2,"ginzos":2,"gipp":2,"gippo":2,"gippos":2,"gipps":2,"girls":0,"givehead":2,"glazeddonut":2,"gob":1,"god":1,"godammit":2,"goddamit":2,"goddammit":2,"goddamn":2,"goddamned":2,"goddamnes":2,"goddamnit":2,"goddamnmuthafucker":2,"goldenshower":2,"golliwog":2,"golliwogs":2,"gonorrehea":2,"gonzagas":1,"gook":2,"gook eye":2,"gook eyes":2,"gookeye":2,"gookeyes":2,"gookies":2,"gooks":2,"gooky":2,"gora":2,"goras":2,"gotohell":2,"goy":1,"goyim":1,"greaseball":2,"greaseballs":2,"greaser":2,"greasers":2,"gringo":2,"gringos":2,"groe":1,"groid":2,"groids":2,"gross":1,"grostulation":1,"gub":1,"gubba":2,"gubbas":2,"gubs":2,"guinea":1,"guineas":1,"guizi":1,"gummer":2,"gun":0,"gwailo":2,"gwailos":2,"gweilo":2,"gweilos":2,"gyopo":2,"gyopos":2,"gyp":2,"gyped":2,"gypo":2,"gypos":2,"gypp":2,"gypped":2,"gyppie":2,"gyppies":2,"gyppo":2,"gyppos":2,"gyppy":2,"gyppys":2,"gypsies":2,"gypsy":2,"gypsys":2,"hadji":2,"hadjis":2,"hairyback":2,"hairybacks":2,"haji":2,"hajis":2,"hajji":2,"hajjis":2,"half breed":2,"half caste":2,"halfbreed":2,"halfcaste":2,"hamas":1,"handjob":2,"haole":2,"haoles":2,"hapa":2,"harder":0,"hardon":2,"harem":0,"headfuck":2,"headlights":0,"hebe":2,"hebephila":1,"hebephile":1,"hebephiles":1,"hebephilia":1,"hebephilic":1,"hebes":2,"heeb":2,"heebs":2,"hell":0,"henhouse":0,"heroin":1,"herpes":1,"heterosexual":0,"hijack":0,"hijacker":0,"hijacking":0,"hillbillies":2,"hillbilly":2,"hindoo":2,"hiscock":2,"hitler":1,"hitlerism":2,"hitlerist":2,"hiv":1,"ho":2,"hobo":2,"hodgie":2,"hoes":2,"hole":0,"holestuffer":2,"homicide":1,"homo":2,"homobangers":2,"homosexual":1,"honger":2,"honk":0,"honkers":2,"honkey":2,"honkeys":2,"honkie":2,"honkies":2,"honky":2,"hook":0,"hooker":2,"hookers":2,"hooters":2,"hore":2,"hori":2,"horis":2,"hork":2,"horn":0,"horney":2,"horniest":2,"horny":1,"horseshit":2,"hosejob":2,"hoser":2,"hostage":0,"hotdamn":2,"hotpussy":2,"hottotrot":2,"hummer":0,"hun":0,"huns":0,"husky":0,"hussy":2,"hustler":0,"hymen":1,"hymie":2,"hymies":2,"iblowu":2,"idiot":2,"ike":1,"ikes":1,"ikey":1,"ikeymo":2,"ikeymos":2,"ikwe":2,"illegal":0,"illegals":1,"incest":1,"indon":2,"indons":2,"injun":2,"injuns":2,"insest":2,"intercourse":1,"interracial":1,"intheass":2,"inthebuff":2,"israel":0,"israeli":0,"israels":0,"italiano":1,"itch":0,"jackass":2,"jackoff":2,"jackshit":2,"jacktheripper":2,"jade":0,"jap":2,"japanese":0,"japcrap":2,"japie":2,"japies":2,"japs":2,"jebus":2,"jeez":2,"jerkoff":2,"jerries":1,"jerry":0,"jesus":1,"jesuschrist":1,"jew":0,"jewboy":2,"jewed":2,"jewess":2,"jewish":0,"jig":2,"jiga":2,"jigaboo":2,"jigaboos":2,"jigarooni":2,"jigaroonis":2,"jigg":2,"jigga":2,"jiggabo":2,"jiggabos":2,"jiggas":2,"jigger":2,"jiggers":2,"jiggs":2,"jiggy":2,"jigs":2,"jihad":1,"jijjiboo":2,"jijjiboos":2,"jimfish":2,"jism":2,"jiz":2,"jizim":2,"jizjuice":2,"jizm":2,"jizz":2,"jizzim":2,"jizzum":2,"joint":0,"juggalo":2,"jugs":0,"jungle bunnies":2,"jungle bunny":2,"junglebunny":2,"kacap":2,"kacapas":2,"kacaps":2,"kaffer":2,"kaffir":2,"kaffre":2,"kafir":2,"kanake":2,"katsap":2,"katsaps":2,"khokhol":2,"khokhols":2,"kid":0,"kigger":2,"kike":2,"kikes":2,"kill":0,"killed":0,"killer":0,"killing":0,"kills":0,"kimchi":0,"kimchis":2,"kink":1,"kinky":1,"kissass":2,"kkk":2,"klansman":2,"klansmen":2,"klanswoman":2,"klanswomen":2,"knife":0,"knockers":1,"kock":1,"kondum":2,"koon":2,"kotex":1,"krap":2,"krappy":2,"kraut":1,"krauts":2,"kuffar":2,"kum":2,"kumbubble":2,"kumbullbe":2,"kummer":2,"kumming":2,"kumquat":2,"kums":2,"kunilingus":2,"kunnilingus":2,"kunt":2,"kushi":2,"kushis":2,"kwa":2,"kwai lo":2,"kwai los":2,"ky":1,"kyke":2,"kykes":2,"kyopo":2,"kyopos":2,"lactate":1,"laid":0,"lapdance":1,"latin":0,"lebo":2,"lebos":2,"lesbain":2,"lesbayn":2,"lesbian":0,"lesbin":2,"lesbo":2,"lez":2,"lezbe":2,"lezbefriends":2,"lezbo":2,"lezz":2,"lezzo":2,"liberal":0,"libido":1,"licker":1,"lickme":2,"lies":0,"limey":2,"limpdick":2,"limy":2,"lingerie":0,"liquor":1,"livesex":2,"loadedgun":2,"lolita":1,"looser":2,"loser":2,"lotion":0,"lovebone":2,"lovegoo":2,"lovegun":2,"lovejuice":2,"lovemuscle":2,"lovepistol":2,"loverocket":2,"lowlife":2,"lsd":1,"lubejob":2,"lubra":2,"lucifer":0,"luckycammeltoe":2,"lugan":2,"lugans":2,"lynch":1,"mabuno":2,"mabunos":2,"macaca":2,"macacas":2,"mad":0,"mafia":1,"magicwand":2,"mahbuno":2,"mahbunos":2,"mams":2,"manhater":2,"manpaste":2,"marijuana":1,"mastabate":2,"mastabater":2,"masterbate":2,"masterblaster":2,"mastrabator":2,"masturbate":2,"masturbating":2,"mattressprincess":2,"mau mau":2,"mau maus":2,"maumau":2,"maumaus":2,"meatbeatter":2,"meatrack":2,"meth":1,"mexican":0,"mgger":2,"mggor":2,"mick":1,"mickeyfinn":2,"mideast":0,"milf":2,"minority":0,"mockey":2,"mockie":2,"mocky":2,"mofo":2,"moky":2,"moles":0,"molest":1,"molestation":1,"molester":1,"molestor":1,"moneyshot":2,"moon cricket":2,"moon crickets":2,"mooncricket":2,"mooncrickets":2,"mormon":0,"moron":2,"moskal":2,"moskals":2,"moslem":2,"mosshead":2,"mothafuck":2,"mothafucka":2,"mothafuckaz":2,"mothafucked":2,"mothafucker":2,"mothafuckin":2,"mothafucking":2,"mothafuckings":2,"motherfuck":2,"motherfucked":2,"motherfucker":2,"motherfuckin":2,"motherfucking":2,"motherfuckings":2,"motherlovebone":2,"muff":2,"muffdive":2,"muffdiver":2,"muffindiver":2,"mufflikcer":2,"mulatto":2,"muncher":2,"munt":2,"murder":1,"murderer":1,"muslim":0,"mzungu":2,"mzungus":2,"naked":0,"narcotic":1,"nasty":0,"nastybitch":2,"nastyho":2,"nastyslut":2,"nastywhore":2,"nazi":1,"necro":1,"negres":2,"negress":2,"negro":2,"negroes":2,"negroid":2,"negros":2,"nig":2,"nigar":2,"nigars":2,"niger":0,"nigerian":1,"nigerians":1,"nigers":2,"nigette":2,"nigettes":2,"nigg":2,"nigga":2,"niggah":2,"niggahs":2,"niggar":2,"niggaracci":2,"niggard":2,"niggarded":2,"niggarding":2,"niggardliness":2,"niggardlinesss":2,"niggardly":0,"niggards":2,"niggars":2,"niggas":2,"niggaz":2,"nigger":2,"niggerhead":2,"niggerhole":2,"niggers":2,"niggle":2,"niggled":2,"niggles":2,"niggling":2,"nigglings":2,"niggor":2,"niggress":2,"niggresses":2,"nigguh":2,"nigguhs":2,"niggur":2,"niggurs":2,"niglet":2,"nignog":2,"nigor":2,"nigors":2,"nigr":2,"nigra":2,"nigras":2,"nigre":2,"nigres":2,"nigress":2,"nigs":2,"nip":2,"nipple":1,"nipplering":1,"nittit":2,"nlgger":2,"nlggor":2,"nofuckingway":2,"nook":1,"nookey":2,"nookie":2,"noonan":2,"nooner":1,"nude":1,"nudger":2,"nuke":1,"nutfucker":2,"nymph":1,"ontherag":2,"oral":1,"oreo":0,"oreos":0,"orga":2,"orgasim":2,"orgasm":1,"orgies":1,"orgy":1,"osama":0,"paddy":1,"paederastic":1,"paederasts":1,"paederasty":1,"paki":2,"pakis":2,"palesimian":2,"palestinian":0,"pancake face":2,"pancake faces":2,"pansies":2,"pansy":2,"panti":2,"panties":0,"payo":2,"pearlnecklace":1,"peck":1,"pecker":1,"peckerwood":2,"pederastic":1,"pederasts":1,"pederasty":1,"pedo":2,"pedophile":1,"pedophiles":1,"pedophilia":1,"pedophilic":1,"pee":1,"peehole":2,"peepee":2,"peepshow":1,"peepshpw":2,"pendy":1,"penetration":1,"peni5":2,"penile":1,"penis":1,"penises":1,"penthouse":0,"period":0,"perv":2,"phonesex":1,"phuk":2,"phuked":2,"phuking":2,"phukked":2,"phukking":2,"phungky":2,"phuq":2,"pi55":2,"picaninny":2,"piccaninny":2,"pickaninnies":2,"pickaninny":2,"piefke":2,"piefkes":2,"piker":2,"pikey":2,"piky":2,"pimp":2,"pimped":2,"pimper":2,"pimpjuic":2,"pimpjuice":2,"pimpsimp":2,"pindick":2,"piss":2,"pissed":2,"pisser":2,"pisses":2,"pisshead":2,"pissin":2,"pissing":2,"pissoff":2,"pistol":1,"pixie":1,"pixy":1,"playboy":1,"playgirl":1,"pocha":2,"pochas":2,"pocho":2,"pochos":2,"pocketpool":2,"pohm":2,"pohms":2,"polack":2,"polacks":2,"pollock":2,"pollocks":2,"pom":2,"pommie":2,"pommie grant":2,"pommie grants":2,"pommies":2,"pommy":2,"poms":2,"poo":2,"poon":2,"poontang":2,"poop":2,"pooper":2,"pooperscooper":2,"pooping":2,"poorwhitetrash":2,"popimp":2,"porch monkey":2,"porch monkies":2,"porchmonkey":2,"porn":1,"pornflick":1,"pornking":2,"porno":1,"pornography":1,"pornprincess":2,"pot":0,"poverty":0,"prairie nigger":2,"prairie niggers":2,"premature":0,"pric":2,"prick":2,"prickhead":2,"primetime":0,"propaganda":0,"pros":0,"prostitute":1,"protestant":1,"pu55i":2,"pu55y":2,"pube":1,"pubic":1,"pubiclice":2,"pud":2,"pudboy":2,"pudd":2,"puddboy":2,"puke":2,"puntang":2,"purinapricness":2,"puss":2,"pussie":2,"pussies":2,"pussy":1,"pussycat":1,"pussyeater":2,"pussyfucker":2,"pussylicker":2,"pussylips":2,"pussylover":2,"pussypounder":2,"pusy":2,"quashie":2,"que":0,"queef":2,"queer":1,"quickie":2,"quim":2,"ra8s":2,"rabbi":0,"racial":0,"racist":1,"radical":1,"radicals":1,"raghead":2,"ragheads":2,"randy":1,"rape":1,"raped":1,"raper":2,"rapist":1,"rearend":2,"rearentry":2,"rectum":1,"redleg":2,"redlegs":2,"redlight":0,"redneck":2,"rednecks":2,"redskin":2,"redskins":2,"reefer":2,"reestie":2,"refugee":0,"reject":0,"remains":0,"rentafuck":2,"republican":0,"rere":2,"retard":2,"retarded":2,"ribbed":1,"rigger":2,"rimjob":2,"rimming":2,"roach":0,"robber":0,"round eyes":2,"roundeye":2,"rump":0,"russki":2,"russkie":2,"sadis":2,"sadom":2,"sambo":2,"sambos":2,"samckdaddy":2,"sand nigger":2,"sand niggers":2,"sandm":2,"sandnigger":2,"satan":1,"scag":1,"scallywag":2,"scat":1,"schlong":2,"schvartse":2,"schvartsen":2,"schwartze":2,"schwartzen":2,"screw":1,"screwyou":2,"scrotum":1,"scum":1,"semen":1,"seppo":2,"seppos":2,"septic":1,"septics":1,"servant":0,"sex":1,"sexed":2,"sexfarm":2,"sexhound":2,"sexhouse":1,"sexing":2,"sexkitten":2,"sexpot":2,"sexslave":2,"sextogo":2,"sextoy":1,"sextoys":1,"sexual":1,"sexually":1,"sexwhore":2,"sexy":1,"sexymoma":2,"sexyslim":2,"shag":1,"shaggin":2,"shagging":2,"shat":2,"shav":2,"shawtypimp":2,"sheeney":2,"shhit":2,"shiksa":2,"shinola":1,"shit":1,"shitcan":2,"shitdick":2,"shite":2,"shiteater":2,"shited":2,"shitface":2,"shitfaced":2,"shitfit":2,"shitforbrains":2,"shitfuck":2,"shitfucker":2,"shitfull":2,"shithapens":2,"shithappens":2,"shithead":2,"shithouse":2,"shiting":2,"shitlist":2,"shitola":2,"shitoutofluck":2,"shits":2,"shitstain":2,"shitted":2,"shitter":2,"shitting":2,"shitty":2,"shoot":0,"shooting":0,"shortfuck":2,"showtime":0,"shylock":2,"shylocks":2,"sick":0,"sissy":2,"sixsixsix":2,"sixtynine":2,"sixtyniner":2,"skank":2,"skankbitch":2,"skankfuck":2,"skankwhore":2,"skanky":2,"skankybitch":2,"skankywhore":2,"skinflute":2,"skum":2,"skumbag":2,"skwa":2,"skwe":2,"slant":0,"slanteye":2,"slanty":2,"slapper":2,"slaughter":1,"slav":0,"slave":2,"slavedriver":2,"sleezebag":2,"sleezeball":2,"slideitin":2,"slime":0,"slimeball":2,"slimebucket":2,"slope":0,"slopehead":2,"slopeheads":2,"sloper":2,"slopers":2,"slopes":0,"slopey":2,"slopeys":2,"slopies":2,"slopy":2,"slut":2,"sluts":2,"slutt":2,"slutting":2,"slutty":2,"slutwear":2,"slutwhore":2,"smack":1,"smackthemonkey":2,"smut":2,"snatch":1,"snatchpatch":2,"snigger":0,"sniggered":0,"sniggering":0,"sniggers":1,"sniper":0,"snot":0,"snowback":2,"snownigger":2,"sob":0,"sodom":1,"sodomise":2,"sodomite":1,"sodomize":2,"sodomy":2,"sonofabitch":2,"sonofbitch":2,"sooties":2,"sooty":2,"sos":0,"soviet":0,"spa":0,"spade":1,"spades":1,"spaghettibender":2,"spaghettinigger":2,"spank":1,"spankthemonkey":2,"spearchucker":2,"spearchuckers":2,"sperm":1,"spermacide":2,"spermbag":2,"spermhearder":2,"spermherder":2,"spic":2,"spick":2,"spicks":2,"spics":2,"spig":2,"spigotty":2,"spik":2,"spit":2,"spitter":2,"splittail":2,"spooge":2,"spreadeagle":2,"spunk":2,"spunky":2,"sqeh":2,"squa":2,"squarehead":2,"squareheads":2,"squaw":2,"squinty":2,"stagg":1,"stiffy":1,"strapon":1,"stringer":2,"stripclub":2,"stroke":0,"stroking":1,"stuinties":2,"stupid":2,"stupidfuck":2,"stupidfucker":2,"suck":1,"suckdick":2,"sucker":2,"suckme":2,"suckmyass":2,"suckmydick":2,"suckmytit":2,"suckoff":2,"suicide":1,"swallow":1,"swallower":2,"swalow":2,"swamp guinea":2,"swamp guineas":2,"swastika":1,"sweetness":0,"syphilis":1,"taboo":0,"tacohead":2,"tacoheads":2,"taff":2,"tampon":0,"tang":2,"tantra":1,"tar babies":2,"tar baby":2,"tarbaby":2,"tard":2,"teat":1,"terror":0,"terrorist":1,"teste":2,"testicle":1,"testicles":1,"thicklip":2,"thicklips":2,"thirdeye":2,"thirdleg":2,"threesome":1,"threeway":2,"timber nigger":2,"timber niggers":2,"timbernigger":2,"tinker":2,"tinkers":2,"tinkle":1,"tit":1,"titbitnipply":2,"titfuck":2,"titfucker":2,"titfuckin":2,"titjob":2,"titlicker":2,"titlover":2,"tits":1,"tittie":2,"titties":2,"titty":2,"tnt":1,"toilet":0,"tongethruster":2,"tongue":0,"tonguethrust":2,"tonguetramp":2,"tortur":2,"torture":1,"tosser":2,"towel head":2,"towel heads":2,"towelhead":2,"trailertrash":2,"tramp":1,"trannie":2,"tranny":2,"transexual":0,"transsexual":0,"transvestite":2,"trap":1,"triplex":2,"trisexual":1,"trojan":0,"trots":1,"tuckahoe":2,"tunneloflove":2,"turd":1,"turnon":2,"twat":2,"twink":2,"twinkie":2,"twobitwhore":2,"uck":2,"uk":0,"ukrop":2,"uncle tom":2,"unfuckable":2,"upskirt":2,"uptheass":2,"upthebutt":2,"urinary":0,"urinate":0,"urine":0,"usama":2,"uterus":1,"vagina":1,"vaginal":1,"vatican":0,"vibr":2,"vibrater":2,"vibrator":1,"vietcong":0,"violence":0,"virgin":0,"virginbreaker":2,"vomit":2,"vulva":1,"wab":2,"wank":2,"wanker":2,"wanking":2,"waysted":2,"weapon":0,"weenie":2,"weewee":2,"welcher":2,"welfare":2,"wetb":2,"wetback":2,"wetbacks":2,"wetspot":2,"whacker":2,"whash":2,"whigger":2,"whiggers":2,"whiskey":0,"whiskeydick":2,"whiskydick":2,"whit":1,"white trash":2,"whitenigger":2,"whites":1,"whitetrash":2,"whitey":2,"whiteys":2,"whities":2,"whiz":2,"whop":2,"whore":2,"whorefucker":2,"whorehouse":2,"wigga":2,"wiggas":2,"wigger":2,"wiggers":2,"willie":2,"williewanker":2,"willy":1,"wn":2,"wog":2,"wogs":2,"womens":0,"wop":2,"wtf":2,"wuss":2,"wuzzie":2,"xkwe":2,"xtc":1,"xxx":1,"yank":2,"yankee":1,"yankees":1,"yanks":2,"yarpie":2,"yarpies":2,"yellowman":2,"yid":2,"yids":2,"zigabo":2,"zigabos":2,"zipperhead":2,"zipperheads":2};
 
 /***/ }),
 /* 385 */
@@ -20806,199 +23068,7 @@ function parse(selector, defaultTagName) {
 
 /***/ }),
 /* 403 */,
-/* 404 */
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-"use strict";
-
-
-var whitespace = __webpack_require__(578)
-var normalize = __webpack_require__(349)
-
-module.exports = footnoteDefinition
-footnoteDefinition.notInList = true
-footnoteDefinition.notInBlock = true
-
-var backslash = '\\'
-var lineFeed = '\n'
-var tab = '\t'
-var space = ' '
-var leftSquareBracket = '['
-var rightSquareBracket = ']'
-var caret = '^'
-var colon = ':'
-
-var EXPRESSION_INITIAL_TAB = /^( {4}|\t)?/gm
-
-function footnoteDefinition(eat, value, silent) {
-  var self = this
-  var offsets = self.offset
-  var index
-  var length
-  var subvalue
-  var now
-  var currentLine
-  var content
-  var queue
-  var subqueue
-  var character
-  var identifier
-  var add
-  var exit
-
-  if (!self.options.footnotes) {
-    return
-  }
-
-  index = 0
-  length = value.length
-  subvalue = ''
-  now = eat.now()
-  currentLine = now.line
-
-  while (index < length) {
-    character = value.charAt(index)
-
-    if (!whitespace(character)) {
-      break
-    }
-
-    subvalue += character
-    index++
-  }
-
-  if (
-    value.charAt(index) !== leftSquareBracket ||
-    value.charAt(index + 1) !== caret
-  ) {
-    return
-  }
-
-  subvalue += leftSquareBracket + caret
-  index = subvalue.length
-  queue = ''
-
-  while (index < length) {
-    character = value.charAt(index)
-
-    if (character === rightSquareBracket) {
-      break
-    } else if (character === backslash) {
-      queue += character
-      index++
-      character = value.charAt(index)
-    }
-
-    queue += character
-    index++
-  }
-
-  if (
-    !queue ||
-    value.charAt(index) !== rightSquareBracket ||
-    value.charAt(index + 1) !== colon
-  ) {
-    return
-  }
-
-  if (silent) {
-    return true
-  }
-
-  identifier = queue
-  subvalue += queue + rightSquareBracket + colon
-  index = subvalue.length
-
-  while (index < length) {
-    character = value.charAt(index)
-
-    if (character !== tab && character !== space) {
-      break
-    }
-
-    subvalue += character
-    index++
-  }
-
-  now.column += subvalue.length
-  now.offset += subvalue.length
-  queue = ''
-  content = ''
-  subqueue = ''
-
-  while (index < length) {
-    character = value.charAt(index)
-
-    if (character === lineFeed) {
-      subqueue = character
-      index++
-
-      while (index < length) {
-        character = value.charAt(index)
-
-        if (character !== lineFeed) {
-          break
-        }
-
-        subqueue += character
-        index++
-      }
-
-      queue += subqueue
-      subqueue = ''
-
-      while (index < length) {
-        character = value.charAt(index)
-
-        if (character !== space) {
-          break
-        }
-
-        subqueue += character
-        index++
-      }
-
-      if (subqueue.length === 0) {
-        break
-      }
-
-      queue += subqueue
-    }
-
-    if (queue) {
-      content += queue
-      queue = ''
-    }
-
-    content += character
-    index++
-  }
-
-  subvalue += content
-
-  content = content.replace(EXPRESSION_INITIAL_TAB, function(line) {
-    offsets[currentLine] = (offsets[currentLine] || 0) + line.length
-    currentLine++
-
-    return ''
-  })
-
-  add = eat(subvalue)
-
-  exit = self.enterBlock()
-  content = self.tokenizeBlock(content, now)
-  exit()
-
-  return add({
-    type: 'footnoteDefinition',
-    identifier: normalize(identifier),
-    label: identifier,
-    children: content
-  })
-}
-
-
-/***/ }),
+/* 404 */,
 /* 405 */,
 /* 406 */,
 /* 407 */,
@@ -21700,8 +23770,17 @@ module.exports = filter
 
 function filter(options) {
   var settings = options || /* istanbul ignore next */ {}
+
+  if (settings.allow && settings.deny) {
+    throw new Error(
+      'Do not provide both allow and deny configuration parameters'
+    )
+  }
+
   return control({
     name: 'alex',
+    reset: Boolean(settings.deny),
+    enable: settings.deny,
     disable: settings.allow,
     source: ['retext-equality', 'retext-profanities']
   })
@@ -22228,100 +24307,7 @@ exports.Octokit = Octokit;
 
 
 /***/ }),
-/* 449 */
-/***/ (function(module) {
-
-"use strict";
-
-
-module.exports = convert
-
-function convert(test) {
-  if (typeof test === 'string') {
-    return typeFactory(test)
-  }
-
-  if (test === null || test === undefined) {
-    return ok
-  }
-
-  if (typeof test === 'object') {
-    return ('length' in test ? anyFactory : matchesFactory)(test)
-  }
-
-  if (typeof test === 'function') {
-    return test
-  }
-
-  throw new Error('Expected function, string, or object as test')
-}
-
-function convertAll(tests) {
-  var results = []
-  var length = tests.length
-  var index = -1
-
-  while (++index < length) {
-    results[index] = convert(tests[index])
-  }
-
-  return results
-}
-
-// Utility assert each property in `test` is represented in `node`, and each
-// values are strictly equal.
-function matchesFactory(test) {
-  return matches
-
-  function matches(node) {
-    var key
-
-    for (key in test) {
-      if (node[key] !== test[key]) {
-        return false
-      }
-    }
-
-    return true
-  }
-}
-
-function anyFactory(tests) {
-  var checks = convertAll(tests)
-  var length = checks.length
-
-  return matches
-
-  function matches() {
-    var index = -1
-
-    while (++index < length) {
-      if (checks[index].apply(this, arguments)) {
-        return true
-      }
-    }
-
-    return false
-  }
-}
-
-// Utility to convert a string into a function which checks a given node’s type
-// for said string.
-function typeFactory(test) {
-  return type
-
-  function type(node) {
-    return Boolean(node && node.type === test)
-  }
-}
-
-// Utility to return true.
-function ok() {
-  return true
-}
-
-
-/***/ }),
+/* 449 */,
 /* 450 */,
 /* 451 */,
 /* 452 */,
@@ -24161,21 +26147,28 @@ function mergeInnerWordSymbol(child, index, parent) {
 "use strict";
 
 
-const ErrorReportingMixinBase = __webpack_require__(394);
-const ErrorReportingPreprocessorMixin = __webpack_require__(478);
-const Mixin = __webpack_require__(785);
+var mdxExpression = __webpack_require__(755)
+var mdxElement = __webpack_require__(57)
+var link = __webpack_require__(290)
+var text = __webpack_require__(580)
 
-class ErrorReportingTokenizerMixin extends ErrorReportingMixinBase {
-    constructor(tokenizer, opts) {
-        super(tokenizer, opts);
+module.exports = serialize
 
-        const preprocessorMixin = Mixin.install(tokenizer.preprocessor, ErrorReportingPreprocessorMixin, opts);
+function serialize(compiler) {
+  var proto = compiler.prototype
+  var visitors = proto.visitors
 
-        this.posTracker = preprocessorMixin.posTracker;
-    }
+  // Serialize code blocks with fences.
+  proto.options.fences = true
+
+  // Add serializers.
+  visitors.mdxSpanExpression = mdxExpression
+  visitors.mdxBlockExpression = mdxExpression
+  visitors.mdxSpanElement = mdxElement
+  visitors.mdxBlockElement = mdxElement
+  visitors.link = link
+  visitors.text = text
 }
-
-module.exports = ErrorReportingTokenizerMixin;
 
 
 /***/ }),
@@ -25231,7 +27224,12 @@ rimraf.sync = rimrafSync
 
 
 /***/ }),
-/* 475 */,
+/* 475 */
+/***/ (function(module) {
+
+module.exports = ["cent","copy","divide","gt","lt","not","para","times"];
+
+/***/ }),
 /* 476 */,
 /* 477 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -25831,9 +27829,48 @@ function createAdjustMap(values) {
 "use strict";
 
 
-//NOTE: this file contains auto-generated array mapped radix tree that is used for the named entity references consumption
-//(details: https://github.com/inikulin/parse5/tree/master/scripts/generate-named-entity-data/README.md)
-module.exports = new Uint16Array([4,52,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,97,98,99,100,101,102,103,104,105,106,107,108,109,110,111,112,113,114,115,116,117,118,119,120,121,122,106,303,412,810,1432,1701,1796,1987,2114,2360,2420,2484,3170,3251,4140,4393,4575,4610,5106,5512,5728,6117,6274,6315,6345,6427,6516,7002,7910,8733,9323,9870,10170,10631,10893,11318,11386,11467,12773,13092,14474,14922,15448,15542,16419,17666,18166,18611,19004,19095,19298,19397,4,16,69,77,97,98,99,102,103,108,109,110,111,112,114,115,116,117,140,150,158,169,176,194,199,210,216,222,226,242,256,266,283,294,108,105,103,5,198,1,59,148,1,198,80,5,38,1,59,156,1,38,99,117,116,101,5,193,1,59,167,1,193,114,101,118,101,59,1,258,4,2,105,121,182,191,114,99,5,194,1,59,189,1,194,59,1,1040,114,59,3,55349,56580,114,97,118,101,5,192,1,59,208,1,192,112,104,97,59,1,913,97,99,114,59,1,256,100,59,1,10835,4,2,103,112,232,237,111,110,59,1,260,102,59,3,55349,56632,112,108,121,70,117,110,99,116,105,111,110,59,1,8289,105,110,103,5,197,1,59,264,1,197,4,2,99,115,272,277,114,59,3,55349,56476,105,103,110,59,1,8788,105,108,100,101,5,195,1,59,292,1,195,109,108,5,196,1,59,301,1,196,4,8,97,99,101,102,111,114,115,117,321,350,354,383,388,394,400,405,4,2,99,114,327,336,107,115,108,97,115,104,59,1,8726,4,2,118,119,342,345,59,1,10983,101,100,59,1,8966,121,59,1,1041,4,3,99,114,116,362,369,379,97,117,115,101,59,1,8757,110,111,117,108,108,105,115,59,1,8492,97,59,1,914,114,59,3,55349,56581,112,102,59,3,55349,56633,101,118,101,59,1,728,99,114,59,1,8492,109,112,101,113,59,1,8782,4,14,72,79,97,99,100,101,102,104,105,108,111,114,115,117,442,447,456,504,542,547,569,573,577,616,678,784,790,796,99,121,59,1,1063,80,89,5,169,1,59,454,1,169,4,3,99,112,121,464,470,497,117,116,101,59,1,262,4,2,59,105,476,478,1,8914,116,97,108,68,105,102,102,101,114,101,110,116,105,97,108,68,59,1,8517,108,101,121,115,59,1,8493,4,4,97,101,105,111,514,520,530,535,114,111,110,59,1,268,100,105,108,5,199,1,59,528,1,199,114,99,59,1,264,110,105,110,116,59,1,8752,111,116,59,1,266,4,2,100,110,553,560,105,108,108,97,59,1,184,116,101,114,68,111,116,59,1,183,114,59,1,8493,105,59,1,935,114,99,108,101,4,4,68,77,80,84,591,596,603,609,111,116,59,1,8857,105,110,117,115,59,1,8854,108,117,115,59,1,8853,105,109,101,115,59,1,8855,111,4,2,99,115,623,646,107,119,105,115,101,67,111,110,116,111,117,114,73,110,116,101,103,114,97,108,59,1,8754,101,67,117,114,108,121,4,2,68,81,658,671,111,117,98,108,101,81,117,111,116,101,59,1,8221,117,111,116,101,59,1,8217,4,4,108,110,112,117,688,701,736,753,111,110,4,2,59,101,696,698,1,8759,59,1,10868,4,3,103,105,116,709,717,722,114,117,101,110,116,59,1,8801,110,116,59,1,8751,111,117,114,73,110,116,101,103,114,97,108,59,1,8750,4,2,102,114,742,745,59,1,8450,111,100,117,99,116,59,1,8720,110,116,101,114,67,108,111,99,107,119,105,115,101,67,111,110,116,111,117,114,73,110,116,101,103,114,97,108,59,1,8755,111,115,115,59,1,10799,99,114,59,3,55349,56478,112,4,2,59,67,803,805,1,8915,97,112,59,1,8781,4,11,68,74,83,90,97,99,101,102,105,111,115,834,850,855,860,865,888,903,916,921,1011,1415,4,2,59,111,840,842,1,8517,116,114,97,104,100,59,1,10513,99,121,59,1,1026,99,121,59,1,1029,99,121,59,1,1039,4,3,103,114,115,873,879,883,103,101,114,59,1,8225,114,59,1,8609,104,118,59,1,10980,4,2,97,121,894,900,114,111,110,59,1,270,59,1,1044,108,4,2,59,116,910,912,1,8711,97,59,1,916,114,59,3,55349,56583,4,2,97,102,927,998,4,2,99,109,933,992,114,105,116,105,99,97,108,4,4,65,68,71,84,950,957,978,985,99,117,116,101,59,1,180,111,4,2,116,117,964,967,59,1,729,98,108,101,65,99,117,116,101,59,1,733,114,97,118,101,59,1,96,105,108,100,101,59,1,732,111,110,100,59,1,8900,102,101,114,101,110,116,105,97,108,68,59,1,8518,4,4,112,116,117,119,1021,1026,1048,1249,102,59,3,55349,56635,4,3,59,68,69,1034,1036,1041,1,168,111,116,59,1,8412,113,117,97,108,59,1,8784,98,108,101,4,6,67,68,76,82,85,86,1065,1082,1101,1189,1211,1236,111,110,116,111,117,114,73,110,116,101,103,114,97,108,59,1,8751,111,4,2,116,119,1089,1092,59,1,168,110,65,114,114,111,119,59,1,8659,4,2,101,111,1107,1141,102,116,4,3,65,82,84,1117,1124,1136,114,114,111,119,59,1,8656,105,103,104,116,65,114,114,111,119,59,1,8660,101,101,59,1,10980,110,103,4,2,76,82,1149,1177,101,102,116,4,2,65,82,1158,1165,114,114,111,119,59,1,10232,105,103,104,116,65,114,114,111,119,59,1,10234,105,103,104,116,65,114,114,111,119,59,1,10233,105,103,104,116,4,2,65,84,1199,1206,114,114,111,119,59,1,8658,101,101,59,1,8872,112,4,2,65,68,1218,1225,114,114,111,119,59,1,8657,111,119,110,65,114,114,111,119,59,1,8661,101,114,116,105,99,97,108,66,97,114,59,1,8741,110,4,6,65,66,76,82,84,97,1264,1292,1299,1352,1391,1408,114,114,111,119,4,3,59,66,85,1276,1278,1283,1,8595,97,114,59,1,10515,112,65,114,114,111,119,59,1,8693,114,101,118,101,59,1,785,101,102,116,4,3,82,84,86,1310,1323,1334,105,103,104,116,86,101,99,116,111,114,59,1,10576,101,101,86,101,99,116,111,114,59,1,10590,101,99,116,111,114,4,2,59,66,1345,1347,1,8637,97,114,59,1,10582,105,103,104,116,4,2,84,86,1362,1373,101,101,86,101,99,116,111,114,59,1,10591,101,99,116,111,114,4,2,59,66,1384,1386,1,8641,97,114,59,1,10583,101,101,4,2,59,65,1399,1401,1,8868,114,114,111,119,59,1,8615,114,114,111,119,59,1,8659,4,2,99,116,1421,1426,114,59,3,55349,56479,114,111,107,59,1,272,4,16,78,84,97,99,100,102,103,108,109,111,112,113,115,116,117,120,1466,1470,1478,1489,1515,1520,1525,1536,1544,1593,1609,1617,1650,1664,1668,1677,71,59,1,330,72,5,208,1,59,1476,1,208,99,117,116,101,5,201,1,59,1487,1,201,4,3,97,105,121,1497,1503,1512,114,111,110,59,1,282,114,99,5,202,1,59,1510,1,202,59,1,1069,111,116,59,1,278,114,59,3,55349,56584,114,97,118,101,5,200,1,59,1534,1,200,101,109,101,110,116,59,1,8712,4,2,97,112,1550,1555,99,114,59,1,274,116,121,4,2,83,86,1563,1576,109,97,108,108,83,113,117,97,114,101,59,1,9723,101,114,121,83,109,97,108,108,83,113,117,97,114,101,59,1,9643,4,2,103,112,1599,1604,111,110,59,1,280,102,59,3,55349,56636,115,105,108,111,110,59,1,917,117,4,2,97,105,1624,1640,108,4,2,59,84,1631,1633,1,10869,105,108,100,101,59,1,8770,108,105,98,114,105,117,109,59,1,8652,4,2,99,105,1656,1660,114,59,1,8496,109,59,1,10867,97,59,1,919,109,108,5,203,1,59,1675,1,203,4,2,105,112,1683,1689,115,116,115,59,1,8707,111,110,101,110,116,105,97,108,69,59,1,8519,4,5,99,102,105,111,115,1713,1717,1722,1762,1791,121,59,1,1060,114,59,3,55349,56585,108,108,101,100,4,2,83,86,1732,1745,109,97,108,108,83,113,117,97,114,101,59,1,9724,101,114,121,83,109,97,108,108,83,113,117,97,114,101,59,1,9642,4,3,112,114,117,1770,1775,1781,102,59,3,55349,56637,65,108,108,59,1,8704,114,105,101,114,116,114,102,59,1,8497,99,114,59,1,8497,4,12,74,84,97,98,99,100,102,103,111,114,115,116,1822,1827,1834,1848,1855,1877,1882,1887,1890,1896,1978,1984,99,121,59,1,1027,5,62,1,59,1832,1,62,109,109,97,4,2,59,100,1843,1845,1,915,59,1,988,114,101,118,101,59,1,286,4,3,101,105,121,1863,1869,1874,100,105,108,59,1,290,114,99,59,1,284,59,1,1043,111,116,59,1,288,114,59,3,55349,56586,59,1,8921,112,102,59,3,55349,56638,101,97,116,101,114,4,6,69,70,71,76,83,84,1915,1933,1944,1953,1959,1971,113,117,97,108,4,2,59,76,1925,1927,1,8805,101,115,115,59,1,8923,117,108,108,69,113,117,97,108,59,1,8807,114,101,97,116,101,114,59,1,10914,101,115,115,59,1,8823,108,97,110,116,69,113,117,97,108,59,1,10878,105,108,100,101,59,1,8819,99,114,59,3,55349,56482,59,1,8811,4,8,65,97,99,102,105,111,115,117,2005,2012,2026,2032,2036,2049,2073,2089,82,68,99,121,59,1,1066,4,2,99,116,2018,2023,101,107,59,1,711,59,1,94,105,114,99,59,1,292,114,59,1,8460,108,98,101,114,116,83,112,97,99,101,59,1,8459,4,2,112,114,2055,2059,102,59,1,8461,105,122,111,110,116,97,108,76,105,110,101,59,1,9472,4,2,99,116,2079,2083,114,59,1,8459,114,111,107,59,1,294,109,112,4,2,68,69,2097,2107,111,119,110,72,117,109,112,59,1,8782,113,117,97,108,59,1,8783,4,14,69,74,79,97,99,100,102,103,109,110,111,115,116,117,2144,2149,2155,2160,2171,2189,2194,2198,2209,2245,2307,2329,2334,2341,99,121,59,1,1045,108,105,103,59,1,306,99,121,59,1,1025,99,117,116,101,5,205,1,59,2169,1,205,4,2,105,121,2177,2186,114,99,5,206,1,59,2184,1,206,59,1,1048,111,116,59,1,304,114,59,1,8465,114,97,118,101,5,204,1,59,2207,1,204,4,3,59,97,112,2217,2219,2238,1,8465,4,2,99,103,2225,2229,114,59,1,298,105,110,97,114,121,73,59,1,8520,108,105,101,115,59,1,8658,4,2,116,118,2251,2281,4,2,59,101,2257,2259,1,8748,4,2,103,114,2265,2271,114,97,108,59,1,8747,115,101,99,116,105,111,110,59,1,8898,105,115,105,98,108,101,4,2,67,84,2293,2300,111,109,109,97,59,1,8291,105,109,101,115,59,1,8290,4,3,103,112,116,2315,2320,2325,111,110,59,1,302,102,59,3,55349,56640,97,59,1,921,99,114,59,1,8464,105,108,100,101,59,1,296,4,2,107,109,2347,2352,99,121,59,1,1030,108,5,207,1,59,2358,1,207,4,5,99,102,111,115,117,2372,2386,2391,2397,2414,4,2,105,121,2378,2383,114,99,59,1,308,59,1,1049,114,59,3,55349,56589,112,102,59,3,55349,56641,4,2,99,101,2403,2408,114,59,3,55349,56485,114,99,121,59,1,1032,107,99,121,59,1,1028,4,7,72,74,97,99,102,111,115,2436,2441,2446,2452,2467,2472,2478,99,121,59,1,1061,99,121,59,1,1036,112,112,97,59,1,922,4,2,101,121,2458,2464,100,105,108,59,1,310,59,1,1050,114,59,3,55349,56590,112,102,59,3,55349,56642,99,114,59,3,55349,56486,4,11,74,84,97,99,101,102,108,109,111,115,116,2508,2513,2520,2562,2585,2981,2986,3004,3011,3146,3167,99,121,59,1,1033,5,60,1,59,2518,1,60,4,5,99,109,110,112,114,2532,2538,2544,2548,2558,117,116,101,59,1,313,98,100,97,59,1,923,103,59,1,10218,108,97,99,101,116,114,102,59,1,8466,114,59,1,8606,4,3,97,101,121,2570,2576,2582,114,111,110,59,1,317,100,105,108,59,1,315,59,1,1051,4,2,102,115,2591,2907,116,4,10,65,67,68,70,82,84,85,86,97,114,2614,2663,2672,2728,2735,2760,2820,2870,2888,2895,4,2,110,114,2620,2633,103,108,101,66,114,97,99,107,101,116,59,1,10216,114,111,119,4,3,59,66,82,2644,2646,2651,1,8592,97,114,59,1,8676,105,103,104,116,65,114,114,111,119,59,1,8646,101,105,108,105,110,103,59,1,8968,111,4,2,117,119,2679,2692,98,108,101,66,114,97,99,107,101,116,59,1,10214,110,4,2,84,86,2699,2710,101,101,86,101,99,116,111,114,59,1,10593,101,99,116,111,114,4,2,59,66,2721,2723,1,8643,97,114,59,1,10585,108,111,111,114,59,1,8970,105,103,104,116,4,2,65,86,2745,2752,114,114,111,119,59,1,8596,101,99,116,111,114,59,1,10574,4,2,101,114,2766,2792,101,4,3,59,65,86,2775,2777,2784,1,8867,114,114,111,119,59,1,8612,101,99,116,111,114,59,1,10586,105,97,110,103,108,101,4,3,59,66,69,2806,2808,2813,1,8882,97,114,59,1,10703,113,117,97,108,59,1,8884,112,4,3,68,84,86,2829,2841,2852,111,119,110,86,101,99,116,111,114,59,1,10577,101,101,86,101,99,116,111,114,59,1,10592,101,99,116,111,114,4,2,59,66,2863,2865,1,8639,97,114,59,1,10584,101,99,116,111,114,4,2,59,66,2881,2883,1,8636,97,114,59,1,10578,114,114,111,119,59,1,8656,105,103,104,116,97,114,114,111,119,59,1,8660,115,4,6,69,70,71,76,83,84,2922,2936,2947,2956,2962,2974,113,117,97,108,71,114,101,97,116,101,114,59,1,8922,117,108,108,69,113,117,97,108,59,1,8806,114,101,97,116,101,114,59,1,8822,101,115,115,59,1,10913,108,97,110,116,69,113,117,97,108,59,1,10877,105,108,100,101,59,1,8818,114,59,3,55349,56591,4,2,59,101,2992,2994,1,8920,102,116,97,114,114,111,119,59,1,8666,105,100,111,116,59,1,319,4,3,110,112,119,3019,3110,3115,103,4,4,76,82,108,114,3030,3058,3070,3098,101,102,116,4,2,65,82,3039,3046,114,114,111,119,59,1,10229,105,103,104,116,65,114,114,111,119,59,1,10231,105,103,104,116,65,114,114,111,119,59,1,10230,101,102,116,4,2,97,114,3079,3086,114,114,111,119,59,1,10232,105,103,104,116,97,114,114,111,119,59,1,10234,105,103,104,116,97,114,114,111,119,59,1,10233,102,59,3,55349,56643,101,114,4,2,76,82,3123,3134,101,102,116,65,114,114,111,119,59,1,8601,105,103,104,116,65,114,114,111,119,59,1,8600,4,3,99,104,116,3154,3158,3161,114,59,1,8466,59,1,8624,114,111,107,59,1,321,59,1,8810,4,8,97,99,101,102,105,111,115,117,3188,3192,3196,3222,3227,3237,3243,3248,112,59,1,10501,121,59,1,1052,4,2,100,108,3202,3213,105,117,109,83,112,97,99,101,59,1,8287,108,105,110,116,114,102,59,1,8499,114,59,3,55349,56592,110,117,115,80,108,117,115,59,1,8723,112,102,59,3,55349,56644,99,114,59,1,8499,59,1,924,4,9,74,97,99,101,102,111,115,116,117,3271,3276,3283,3306,3422,3427,4120,4126,4137,99,121,59,1,1034,99,117,116,101,59,1,323,4,3,97,101,121,3291,3297,3303,114,111,110,59,1,327,100,105,108,59,1,325,59,1,1053,4,3,103,115,119,3314,3380,3415,97,116,105,118,101,4,3,77,84,86,3327,3340,3365,101,100,105,117,109,83,112,97,99,101,59,1,8203,104,105,4,2,99,110,3348,3357,107,83,112,97,99,101,59,1,8203,83,112,97,99,101,59,1,8203,101,114,121,84,104,105,110,83,112,97,99,101,59,1,8203,116,101,100,4,2,71,76,3389,3405,114,101,97,116,101,114,71,114,101,97,116,101,114,59,1,8811,101,115,115,76,101,115,115,59,1,8810,76,105,110,101,59,1,10,114,59,3,55349,56593,4,4,66,110,112,116,3437,3444,3460,3464,114,101,97,107,59,1,8288,66,114,101,97,107,105,110,103,83,112,97,99,101,59,1,160,102,59,1,8469,4,13,59,67,68,69,71,72,76,78,80,82,83,84,86,3492,3494,3517,3536,3578,3657,3685,3784,3823,3860,3915,4066,4107,1,10988,4,2,111,117,3500,3510,110,103,114,117,101,110,116,59,1,8802,112,67,97,112,59,1,8813,111,117,98,108,101,86,101,114,116,105,99,97,108,66,97,114,59,1,8742,4,3,108,113,120,3544,3552,3571,101,109,101,110,116,59,1,8713,117,97,108,4,2,59,84,3561,3563,1,8800,105,108,100,101,59,3,8770,824,105,115,116,115,59,1,8708,114,101,97,116,101,114,4,7,59,69,70,71,76,83,84,3600,3602,3609,3621,3631,3637,3650,1,8815,113,117,97,108,59,1,8817,117,108,108,69,113,117,97,108,59,3,8807,824,114,101,97,116,101,114,59,3,8811,824,101,115,115,59,1,8825,108,97,110,116,69,113,117,97,108,59,3,10878,824,105,108,100,101,59,1,8821,117,109,112,4,2,68,69,3666,3677,111,119,110,72,117,109,112,59,3,8782,824,113,117,97,108,59,3,8783,824,101,4,2,102,115,3692,3724,116,84,114,105,97,110,103,108,101,4,3,59,66,69,3709,3711,3717,1,8938,97,114,59,3,10703,824,113,117,97,108,59,1,8940,115,4,6,59,69,71,76,83,84,3739,3741,3748,3757,3764,3777,1,8814,113,117,97,108,59,1,8816,114,101,97,116,101,114,59,1,8824,101,115,115,59,3,8810,824,108,97,110,116,69,113,117,97,108,59,3,10877,824,105,108,100,101,59,1,8820,101,115,116,101,100,4,2,71,76,3795,3812,114,101,97,116,101,114,71,114,101,97,116,101,114,59,3,10914,824,101,115,115,76,101,115,115,59,3,10913,824,114,101,99,101,100,101,115,4,3,59,69,83,3838,3840,3848,1,8832,113,117,97,108,59,3,10927,824,108,97,110,116,69,113,117,97,108,59,1,8928,4,2,101,105,3866,3881,118,101,114,115,101,69,108,101,109,101,110,116,59,1,8716,103,104,116,84,114,105,97,110,103,108,101,4,3,59,66,69,3900,3902,3908,1,8939,97,114,59,3,10704,824,113,117,97,108,59,1,8941,4,2,113,117,3921,3973,117,97,114,101,83,117,4,2,98,112,3933,3952,115,101,116,4,2,59,69,3942,3945,3,8847,824,113,117,97,108,59,1,8930,101,114,115,101,116,4,2,59,69,3963,3966,3,8848,824,113,117,97,108,59,1,8931,4,3,98,99,112,3981,4000,4045,115,101,116,4,2,59,69,3990,3993,3,8834,8402,113,117,97,108,59,1,8840,99,101,101,100,115,4,4,59,69,83,84,4015,4017,4025,4037,1,8833,113,117,97,108,59,3,10928,824,108,97,110,116,69,113,117,97,108,59,1,8929,105,108,100,101,59,3,8831,824,101,114,115,101,116,4,2,59,69,4056,4059,3,8835,8402,113,117,97,108,59,1,8841,105,108,100,101,4,4,59,69,70,84,4080,4082,4089,4100,1,8769,113,117,97,108,59,1,8772,117,108,108,69,113,117,97,108,59,1,8775,105,108,100,101,59,1,8777,101,114,116,105,99,97,108,66,97,114,59,1,8740,99,114,59,3,55349,56489,105,108,100,101,5,209,1,59,4135,1,209,59,1,925,4,14,69,97,99,100,102,103,109,111,112,114,115,116,117,118,4170,4176,4187,4205,4212,4217,4228,4253,4259,4292,4295,4316,4337,4346,108,105,103,59,1,338,99,117,116,101,5,211,1,59,4185,1,211,4,2,105,121,4193,4202,114,99,5,212,1,59,4200,1,212,59,1,1054,98,108,97,99,59,1,336,114,59,3,55349,56594,114,97,118,101,5,210,1,59,4226,1,210,4,3,97,101,105,4236,4241,4246,99,114,59,1,332,103,97,59,1,937,99,114,111,110,59,1,927,112,102,59,3,55349,56646,101,110,67,117,114,108,121,4,2,68,81,4272,4285,111,117,98,108,101,81,117,111,116,101,59,1,8220,117,111,116,101,59,1,8216,59,1,10836,4,2,99,108,4301,4306,114,59,3,55349,56490,97,115,104,5,216,1,59,4314,1,216,105,4,2,108,109,4323,4332,100,101,5,213,1,59,4330,1,213,101,115,59,1,10807,109,108,5,214,1,59,4344,1,214,101,114,4,2,66,80,4354,4380,4,2,97,114,4360,4364,114,59,1,8254,97,99,4,2,101,107,4372,4375,59,1,9182,101,116,59,1,9140,97,114,101,110,116,104,101,115,105,115,59,1,9180,4,9,97,99,102,104,105,108,111,114,115,4413,4422,4426,4431,4435,4438,4448,4471,4561,114,116,105,97,108,68,59,1,8706,121,59,1,1055,114,59,3,55349,56595,105,59,1,934,59,1,928,117,115,77,105,110,117,115,59,1,177,4,2,105,112,4454,4467,110,99,97,114,101,112,108,97,110,101,59,1,8460,102,59,1,8473,4,4,59,101,105,111,4481,4483,4526,4531,1,10939,99,101,100,101,115,4,4,59,69,83,84,4498,4500,4507,4519,1,8826,113,117,97,108,59,1,10927,108,97,110,116,69,113,117,97,108,59,1,8828,105,108,100,101,59,1,8830,109,101,59,1,8243,4,2,100,112,4537,4543,117,99,116,59,1,8719,111,114,116,105,111,110,4,2,59,97,4555,4557,1,8759,108,59,1,8733,4,2,99,105,4567,4572,114,59,3,55349,56491,59,1,936,4,4,85,102,111,115,4585,4594,4599,4604,79,84,5,34,1,59,4592,1,34,114,59,3,55349,56596,112,102,59,1,8474,99,114,59,3,55349,56492,4,12,66,69,97,99,101,102,104,105,111,114,115,117,4636,4642,4650,4681,4704,4763,4767,4771,5047,5069,5081,5094,97,114,114,59,1,10512,71,5,174,1,59,4648,1,174,4,3,99,110,114,4658,4664,4668,117,116,101,59,1,340,103,59,1,10219,114,4,2,59,116,4675,4677,1,8608,108,59,1,10518,4,3,97,101,121,4689,4695,4701,114,111,110,59,1,344,100,105,108,59,1,342,59,1,1056,4,2,59,118,4710,4712,1,8476,101,114,115,101,4,2,69,85,4722,4748,4,2,108,113,4728,4736,101,109,101,110,116,59,1,8715,117,105,108,105,98,114,105,117,109,59,1,8651,112,69,113,117,105,108,105,98,114,105,117,109,59,1,10607,114,59,1,8476,111,59,1,929,103,104,116,4,8,65,67,68,70,84,85,86,97,4792,4840,4849,4905,4912,4972,5022,5040,4,2,110,114,4798,4811,103,108,101,66,114,97,99,107,101,116,59,1,10217,114,111,119,4,3,59,66,76,4822,4824,4829,1,8594,97,114,59,1,8677,101,102,116,65,114,114,111,119,59,1,8644,101,105,108,105,110,103,59,1,8969,111,4,2,117,119,4856,4869,98,108,101,66,114,97,99,107,101,116,59,1,10215,110,4,2,84,86,4876,4887,101,101,86,101,99,116,111,114,59,1,10589,101,99,116,111,114,4,2,59,66,4898,4900,1,8642,97,114,59,1,10581,108,111,111,114,59,1,8971,4,2,101,114,4918,4944,101,4,3,59,65,86,4927,4929,4936,1,8866,114,114,111,119,59,1,8614,101,99,116,111,114,59,1,10587,105,97,110,103,108,101,4,3,59,66,69,4958,4960,4965,1,8883,97,114,59,1,10704,113,117,97,108,59,1,8885,112,4,3,68,84,86,4981,4993,5004,111,119,110,86,101,99,116,111,114,59,1,10575,101,101,86,101,99,116,111,114,59,1,10588,101,99,116,111,114,4,2,59,66,5015,5017,1,8638,97,114,59,1,10580,101,99,116,111,114,4,2,59,66,5033,5035,1,8640,97,114,59,1,10579,114,114,111,119,59,1,8658,4,2,112,117,5053,5057,102,59,1,8477,110,100,73,109,112,108,105,101,115,59,1,10608,105,103,104,116,97,114,114,111,119,59,1,8667,4,2,99,104,5087,5091,114,59,1,8475,59,1,8625,108,101,68,101,108,97,121,101,100,59,1,10740,4,13,72,79,97,99,102,104,105,109,111,113,115,116,117,5134,5150,5157,5164,5198,5203,5259,5265,5277,5283,5374,5380,5385,4,2,67,99,5140,5146,72,99,121,59,1,1065,121,59,1,1064,70,84,99,121,59,1,1068,99,117,116,101,59,1,346,4,5,59,97,101,105,121,5176,5178,5184,5190,5195,1,10940,114,111,110,59,1,352,100,105,108,59,1,350,114,99,59,1,348,59,1,1057,114,59,3,55349,56598,111,114,116,4,4,68,76,82,85,5216,5227,5238,5250,111,119,110,65,114,114,111,119,59,1,8595,101,102,116,65,114,114,111,119,59,1,8592,105,103,104,116,65,114,114,111,119,59,1,8594,112,65,114,114,111,119,59,1,8593,103,109,97,59,1,931,97,108,108,67,105,114,99,108,101,59,1,8728,112,102,59,3,55349,56650,4,2,114,117,5289,5293,116,59,1,8730,97,114,101,4,4,59,73,83,85,5306,5308,5322,5367,1,9633,110,116,101,114,115,101,99,116,105,111,110,59,1,8851,117,4,2,98,112,5329,5347,115,101,116,4,2,59,69,5338,5340,1,8847,113,117,97,108,59,1,8849,101,114,115,101,116,4,2,59,69,5358,5360,1,8848,113,117,97,108,59,1,8850,110,105,111,110,59,1,8852,99,114,59,3,55349,56494,97,114,59,1,8902,4,4,98,99,109,112,5395,5420,5475,5478,4,2,59,115,5401,5403,1,8912,101,116,4,2,59,69,5411,5413,1,8912,113,117,97,108,59,1,8838,4,2,99,104,5426,5468,101,101,100,115,4,4,59,69,83,84,5440,5442,5449,5461,1,8827,113,117,97,108,59,1,10928,108,97,110,116,69,113,117,97,108,59,1,8829,105,108,100,101,59,1,8831,84,104,97,116,59,1,8715,59,1,8721,4,3,59,101,115,5486,5488,5507,1,8913,114,115,101,116,4,2,59,69,5498,5500,1,8835,113,117,97,108,59,1,8839,101,116,59,1,8913,4,11,72,82,83,97,99,102,104,105,111,114,115,5536,5546,5552,5567,5579,5602,5607,5655,5695,5701,5711,79,82,78,5,222,1,59,5544,1,222,65,68,69,59,1,8482,4,2,72,99,5558,5563,99,121,59,1,1035,121,59,1,1062,4,2,98,117,5573,5576,59,1,9,59,1,932,4,3,97,101,121,5587,5593,5599,114,111,110,59,1,356,100,105,108,59,1,354,59,1,1058,114,59,3,55349,56599,4,2,101,105,5613,5631,4,2,114,116,5619,5627,101,102,111,114,101,59,1,8756,97,59,1,920,4,2,99,110,5637,5647,107,83,112,97,99,101,59,3,8287,8202,83,112,97,99,101,59,1,8201,108,100,101,4,4,59,69,70,84,5668,5670,5677,5688,1,8764,113,117,97,108,59,1,8771,117,108,108,69,113,117,97,108,59,1,8773,105,108,100,101,59,1,8776,112,102,59,3,55349,56651,105,112,108,101,68,111,116,59,1,8411,4,2,99,116,5717,5722,114,59,3,55349,56495,114,111,107,59,1,358,4,14,97,98,99,100,102,103,109,110,111,112,114,115,116,117,5758,5789,5805,5823,5830,5835,5846,5852,5921,5937,6089,6095,6101,6108,4,2,99,114,5764,5774,117,116,101,5,218,1,59,5772,1,218,114,4,2,59,111,5781,5783,1,8607,99,105,114,59,1,10569,114,4,2,99,101,5796,5800,121,59,1,1038,118,101,59,1,364,4,2,105,121,5811,5820,114,99,5,219,1,59,5818,1,219,59,1,1059,98,108,97,99,59,1,368,114,59,3,55349,56600,114,97,118,101,5,217,1,59,5844,1,217,97,99,114,59,1,362,4,2,100,105,5858,5905,101,114,4,2,66,80,5866,5892,4,2,97,114,5872,5876,114,59,1,95,97,99,4,2,101,107,5884,5887,59,1,9183,101,116,59,1,9141,97,114,101,110,116,104,101,115,105,115,59,1,9181,111,110,4,2,59,80,5913,5915,1,8899,108,117,115,59,1,8846,4,2,103,112,5927,5932,111,110,59,1,370,102,59,3,55349,56652,4,8,65,68,69,84,97,100,112,115,5955,5985,5996,6009,6026,6033,6044,6075,114,114,111,119,4,3,59,66,68,5967,5969,5974,1,8593,97,114,59,1,10514,111,119,110,65,114,114,111,119,59,1,8645,111,119,110,65,114,114,111,119,59,1,8597,113,117,105,108,105,98,114,105,117,109,59,1,10606,101,101,4,2,59,65,6017,6019,1,8869,114,114,111,119,59,1,8613,114,114,111,119,59,1,8657,111,119,110,97,114,114,111,119,59,1,8661,101,114,4,2,76,82,6052,6063,101,102,116,65,114,114,111,119,59,1,8598,105,103,104,116,65,114,114,111,119,59,1,8599,105,4,2,59,108,6082,6084,1,978,111,110,59,1,933,105,110,103,59,1,366,99,114,59,3,55349,56496,105,108,100,101,59,1,360,109,108,5,220,1,59,6115,1,220,4,9,68,98,99,100,101,102,111,115,118,6137,6143,6148,6152,6166,6250,6255,6261,6267,97,115,104,59,1,8875,97,114,59,1,10987,121,59,1,1042,97,115,104,4,2,59,108,6161,6163,1,8873,59,1,10982,4,2,101,114,6172,6175,59,1,8897,4,3,98,116,121,6183,6188,6238,97,114,59,1,8214,4,2,59,105,6194,6196,1,8214,99,97,108,4,4,66,76,83,84,6209,6214,6220,6231,97,114,59,1,8739,105,110,101,59,1,124,101,112,97,114,97,116,111,114,59,1,10072,105,108,100,101,59,1,8768,84,104,105,110,83,112,97,99,101,59,1,8202,114,59,3,55349,56601,112,102,59,3,55349,56653,99,114,59,3,55349,56497,100,97,115,104,59,1,8874,4,5,99,101,102,111,115,6286,6292,6298,6303,6309,105,114,99,59,1,372,100,103,101,59,1,8896,114,59,3,55349,56602,112,102,59,3,55349,56654,99,114,59,3,55349,56498,4,4,102,105,111,115,6325,6330,6333,6339,114,59,3,55349,56603,59,1,926,112,102,59,3,55349,56655,99,114,59,3,55349,56499,4,9,65,73,85,97,99,102,111,115,117,6365,6370,6375,6380,6391,6405,6410,6416,6422,99,121,59,1,1071,99,121,59,1,1031,99,121,59,1,1070,99,117,116,101,5,221,1,59,6389,1,221,4,2,105,121,6397,6402,114,99,59,1,374,59,1,1067,114,59,3,55349,56604,112,102,59,3,55349,56656,99,114,59,3,55349,56500,109,108,59,1,376,4,8,72,97,99,100,101,102,111,115,6445,6450,6457,6472,6477,6501,6505,6510,99,121,59,1,1046,99,117,116,101,59,1,377,4,2,97,121,6463,6469,114,111,110,59,1,381,59,1,1047,111,116,59,1,379,4,2,114,116,6483,6497,111,87,105,100,116,104,83,112,97,99,101,59,1,8203,97,59,1,918,114,59,1,8488,112,102,59,1,8484,99,114,59,3,55349,56501,4,16,97,98,99,101,102,103,108,109,110,111,112,114,115,116,117,119,6550,6561,6568,6612,6622,6634,6645,6672,6699,6854,6870,6923,6933,6963,6974,6983,99,117,116,101,5,225,1,59,6559,1,225,114,101,118,101,59,1,259,4,6,59,69,100,105,117,121,6582,6584,6588,6591,6600,6609,1,8766,59,3,8766,819,59,1,8767,114,99,5,226,1,59,6598,1,226,116,101,5,180,1,59,6607,1,180,59,1,1072,108,105,103,5,230,1,59,6620,1,230,4,2,59,114,6628,6630,1,8289,59,3,55349,56606,114,97,118,101,5,224,1,59,6643,1,224,4,2,101,112,6651,6667,4,2,102,112,6657,6663,115,121,109,59,1,8501,104,59,1,8501,104,97,59,1,945,4,2,97,112,6678,6692,4,2,99,108,6684,6688,114,59,1,257,103,59,1,10815,5,38,1,59,6697,1,38,4,2,100,103,6705,6737,4,5,59,97,100,115,118,6717,6719,6724,6727,6734,1,8743,110,100,59,1,10837,59,1,10844,108,111,112,101,59,1,10840,59,1,10842,4,7,59,101,108,109,114,115,122,6753,6755,6758,6762,6814,6835,6848,1,8736,59,1,10660,101,59,1,8736,115,100,4,2,59,97,6770,6772,1,8737,4,8,97,98,99,100,101,102,103,104,6790,6793,6796,6799,6802,6805,6808,6811,59,1,10664,59,1,10665,59,1,10666,59,1,10667,59,1,10668,59,1,10669,59,1,10670,59,1,10671,116,4,2,59,118,6821,6823,1,8735,98,4,2,59,100,6830,6832,1,8894,59,1,10653,4,2,112,116,6841,6845,104,59,1,8738,59,1,197,97,114,114,59,1,9084,4,2,103,112,6860,6865,111,110,59,1,261,102,59,3,55349,56658,4,7,59,69,97,101,105,111,112,6886,6888,6891,6897,6900,6904,6908,1,8776,59,1,10864,99,105,114,59,1,10863,59,1,8778,100,59,1,8779,115,59,1,39,114,111,120,4,2,59,101,6917,6919,1,8776,113,59,1,8778,105,110,103,5,229,1,59,6931,1,229,4,3,99,116,121,6941,6946,6949,114,59,3,55349,56502,59,1,42,109,112,4,2,59,101,6957,6959,1,8776,113,59,1,8781,105,108,100,101,5,227,1,59,6972,1,227,109,108,5,228,1,59,6981,1,228,4,2,99,105,6989,6997,111,110,105,110,116,59,1,8755,110,116,59,1,10769,4,16,78,97,98,99,100,101,102,105,107,108,110,111,112,114,115,117,7036,7041,7119,7135,7149,7155,7219,7224,7347,7354,7463,7489,7786,7793,7814,7866,111,116,59,1,10989,4,2,99,114,7047,7094,107,4,4,99,101,112,115,7058,7064,7073,7080,111,110,103,59,1,8780,112,115,105,108,111,110,59,1,1014,114,105,109,101,59,1,8245,105,109,4,2,59,101,7088,7090,1,8765,113,59,1,8909,4,2,118,119,7100,7105,101,101,59,1,8893,101,100,4,2,59,103,7113,7115,1,8965,101,59,1,8965,114,107,4,2,59,116,7127,7129,1,9141,98,114,107,59,1,9142,4,2,111,121,7141,7146,110,103,59,1,8780,59,1,1073,113,117,111,59,1,8222,4,5,99,109,112,114,116,7167,7181,7188,7193,7199,97,117,115,4,2,59,101,7176,7178,1,8757,59,1,8757,112,116,121,118,59,1,10672,115,105,59,1,1014,110,111,117,59,1,8492,4,3,97,104,119,7207,7210,7213,59,1,946,59,1,8502,101,101,110,59,1,8812,114,59,3,55349,56607,103,4,7,99,111,115,116,117,118,119,7241,7262,7288,7305,7328,7335,7340,4,3,97,105,117,7249,7253,7258,112,59,1,8898,114,99,59,1,9711,112,59,1,8899,4,3,100,112,116,7270,7275,7281,111,116,59,1,10752,108,117,115,59,1,10753,105,109,101,115,59,1,10754,4,2,113,116,7294,7300,99,117,112,59,1,10758,97,114,59,1,9733,114,105,97,110,103,108,101,4,2,100,117,7318,7324,111,119,110,59,1,9661,112,59,1,9651,112,108,117,115,59,1,10756,101,101,59,1,8897,101,100,103,101,59,1,8896,97,114,111,119,59,1,10509,4,3,97,107,111,7362,7436,7458,4,2,99,110,7368,7432,107,4,3,108,115,116,7377,7386,7394,111,122,101,110,103,101,59,1,10731,113,117,97,114,101,59,1,9642,114,105,97,110,103,108,101,4,4,59,100,108,114,7411,7413,7419,7425,1,9652,111,119,110,59,1,9662,101,102,116,59,1,9666,105,103,104,116,59,1,9656,107,59,1,9251,4,2,49,51,7442,7454,4,2,50,52,7448,7451,59,1,9618,59,1,9617,52,59,1,9619,99,107,59,1,9608,4,2,101,111,7469,7485,4,2,59,113,7475,7478,3,61,8421,117,105,118,59,3,8801,8421,116,59,1,8976,4,4,112,116,119,120,7499,7504,7517,7523,102,59,3,55349,56659,4,2,59,116,7510,7512,1,8869,111,109,59,1,8869,116,105,101,59,1,8904,4,12,68,72,85,86,98,100,104,109,112,116,117,118,7549,7571,7597,7619,7655,7660,7682,7708,7715,7721,7728,7750,4,4,76,82,108,114,7559,7562,7565,7568,59,1,9559,59,1,9556,59,1,9558,59,1,9555,4,5,59,68,85,100,117,7583,7585,7588,7591,7594,1,9552,59,1,9574,59,1,9577,59,1,9572,59,1,9575,4,4,76,82,108,114,7607,7610,7613,7616,59,1,9565,59,1,9562,59,1,9564,59,1,9561,4,7,59,72,76,82,104,108,114,7635,7637,7640,7643,7646,7649,7652,1,9553,59,1,9580,59,1,9571,59,1,9568,59,1,9579,59,1,9570,59,1,9567,111,120,59,1,10697,4,4,76,82,108,114,7670,7673,7676,7679,59,1,9557,59,1,9554,59,1,9488,59,1,9484,4,5,59,68,85,100,117,7694,7696,7699,7702,7705,1,9472,59,1,9573,59,1,9576,59,1,9516,59,1,9524,105,110,117,115,59,1,8863,108,117,115,59,1,8862,105,109,101,115,59,1,8864,4,4,76,82,108,114,7738,7741,7744,7747,59,1,9563,59,1,9560,59,1,9496,59,1,9492,4,7,59,72,76,82,104,108,114,7766,7768,7771,7774,7777,7780,7783,1,9474,59,1,9578,59,1,9569,59,1,9566,59,1,9532,59,1,9508,59,1,9500,114,105,109,101,59,1,8245,4,2,101,118,7799,7804,118,101,59,1,728,98,97,114,5,166,1,59,7812,1,166,4,4,99,101,105,111,7824,7829,7834,7846,114,59,3,55349,56503,109,105,59,1,8271,109,4,2,59,101,7841,7843,1,8765,59,1,8909,108,4,3,59,98,104,7855,7857,7860,1,92,59,1,10693,115,117,98,59,1,10184,4,2,108,109,7872,7885,108,4,2,59,101,7879,7881,1,8226,116,59,1,8226,112,4,3,59,69,101,7894,7896,7899,1,8782,59,1,10926,4,2,59,113,7905,7907,1,8783,59,1,8783,4,15,97,99,100,101,102,104,105,108,111,114,115,116,117,119,121,7942,8021,8075,8080,8121,8126,8157,8279,8295,8430,8446,8485,8491,8707,8726,4,3,99,112,114,7950,7956,8007,117,116,101,59,1,263,4,6,59,97,98,99,100,115,7970,7972,7977,7984,7998,8003,1,8745,110,100,59,1,10820,114,99,117,112,59,1,10825,4,2,97,117,7990,7994,112,59,1,10827,112,59,1,10823,111,116,59,1,10816,59,3,8745,65024,4,2,101,111,8013,8017,116,59,1,8257,110,59,1,711,4,4,97,101,105,117,8031,8046,8056,8061,4,2,112,114,8037,8041,115,59,1,10829,111,110,59,1,269,100,105,108,5,231,1,59,8054,1,231,114,99,59,1,265,112,115,4,2,59,115,8069,8071,1,10828,109,59,1,10832,111,116,59,1,267,4,3,100,109,110,8088,8097,8104,105,108,5,184,1,59,8095,1,184,112,116,121,118,59,1,10674,116,5,162,2,59,101,8112,8114,1,162,114,100,111,116,59,1,183,114,59,3,55349,56608,4,3,99,101,105,8134,8138,8154,121,59,1,1095,99,107,4,2,59,109,8146,8148,1,10003,97,114,107,59,1,10003,59,1,967,114,4,7,59,69,99,101,102,109,115,8174,8176,8179,8258,8261,8268,8273,1,9675,59,1,10691,4,3,59,101,108,8187,8189,8193,1,710,113,59,1,8791,101,4,2,97,100,8200,8223,114,114,111,119,4,2,108,114,8210,8216,101,102,116,59,1,8634,105,103,104,116,59,1,8635,4,5,82,83,97,99,100,8235,8238,8241,8246,8252,59,1,174,59,1,9416,115,116,59,1,8859,105,114,99,59,1,8858,97,115,104,59,1,8861,59,1,8791,110,105,110,116,59,1,10768,105,100,59,1,10991,99,105,114,59,1,10690,117,98,115,4,2,59,117,8288,8290,1,9827,105,116,59,1,9827,4,4,108,109,110,112,8305,8326,8376,8400,111,110,4,2,59,101,8313,8315,1,58,4,2,59,113,8321,8323,1,8788,59,1,8788,4,2,109,112,8332,8344,97,4,2,59,116,8339,8341,1,44,59,1,64,4,3,59,102,108,8352,8354,8358,1,8705,110,59,1,8728,101,4,2,109,120,8365,8371,101,110,116,59,1,8705,101,115,59,1,8450,4,2,103,105,8382,8395,4,2,59,100,8388,8390,1,8773,111,116,59,1,10861,110,116,59,1,8750,4,3,102,114,121,8408,8412,8417,59,3,55349,56660,111,100,59,1,8720,5,169,2,59,115,8424,8426,1,169,114,59,1,8471,4,2,97,111,8436,8441,114,114,59,1,8629,115,115,59,1,10007,4,2,99,117,8452,8457,114,59,3,55349,56504,4,2,98,112,8463,8474,4,2,59,101,8469,8471,1,10959,59,1,10961,4,2,59,101,8480,8482,1,10960,59,1,10962,100,111,116,59,1,8943,4,7,100,101,108,112,114,118,119,8507,8522,8536,8550,8600,8697,8702,97,114,114,4,2,108,114,8516,8519,59,1,10552,59,1,10549,4,2,112,115,8528,8532,114,59,1,8926,99,59,1,8927,97,114,114,4,2,59,112,8545,8547,1,8630,59,1,10557,4,6,59,98,99,100,111,115,8564,8566,8573,8587,8592,8596,1,8746,114,99,97,112,59,1,10824,4,2,97,117,8579,8583,112,59,1,10822,112,59,1,10826,111,116,59,1,8845,114,59,1,10821,59,3,8746,65024,4,4,97,108,114,118,8610,8623,8663,8672,114,114,4,2,59,109,8618,8620,1,8631,59,1,10556,121,4,3,101,118,119,8632,8651,8656,113,4,2,112,115,8639,8645,114,101,99,59,1,8926,117,99,99,59,1,8927,101,101,59,1,8910,101,100,103,101,59,1,8911,101,110,5,164,1,59,8670,1,164,101,97,114,114,111,119,4,2,108,114,8684,8690,101,102,116,59,1,8630,105,103,104,116,59,1,8631,101,101,59,1,8910,101,100,59,1,8911,4,2,99,105,8713,8721,111,110,105,110,116,59,1,8754,110,116,59,1,8753,108,99,116,121,59,1,9005,4,19,65,72,97,98,99,100,101,102,104,105,106,108,111,114,115,116,117,119,122,8773,8778,8783,8821,8839,8854,8887,8914,8930,8944,9036,9041,9058,9197,9227,9258,9281,9297,9305,114,114,59,1,8659,97,114,59,1,10597,4,4,103,108,114,115,8793,8799,8805,8809,103,101,114,59,1,8224,101,116,104,59,1,8504,114,59,1,8595,104,4,2,59,118,8816,8818,1,8208,59,1,8867,4,2,107,108,8827,8834,97,114,111,119,59,1,10511,97,99,59,1,733,4,2,97,121,8845,8851,114,111,110,59,1,271,59,1,1076,4,3,59,97,111,8862,8864,8880,1,8518,4,2,103,114,8870,8876,103,101,114,59,1,8225,114,59,1,8650,116,115,101,113,59,1,10871,4,3,103,108,109,8895,8902,8907,5,176,1,59,8900,1,176,116,97,59,1,948,112,116,121,118,59,1,10673,4,2,105,114,8920,8926,115,104,116,59,1,10623,59,3,55349,56609,97,114,4,2,108,114,8938,8941,59,1,8643,59,1,8642,4,5,97,101,103,115,118,8956,8986,8989,8996,9001,109,4,3,59,111,115,8965,8967,8983,1,8900,110,100,4,2,59,115,8975,8977,1,8900,117,105,116,59,1,9830,59,1,9830,59,1,168,97,109,109,97,59,1,989,105,110,59,1,8946,4,3,59,105,111,9009,9011,9031,1,247,100,101,5,247,2,59,111,9020,9022,1,247,110,116,105,109,101,115,59,1,8903,110,120,59,1,8903,99,121,59,1,1106,99,4,2,111,114,9048,9053,114,110,59,1,8990,111,112,59,1,8973,4,5,108,112,116,117,119,9070,9076,9081,9130,9144,108,97,114,59,1,36,102,59,3,55349,56661,4,5,59,101,109,112,115,9093,9095,9109,9116,9122,1,729,113,4,2,59,100,9102,9104,1,8784,111,116,59,1,8785,105,110,117,115,59,1,8760,108,117,115,59,1,8724,113,117,97,114,101,59,1,8865,98,108,101,98,97,114,119,101,100,103,101,59,1,8966,110,4,3,97,100,104,9153,9160,9172,114,114,111,119,59,1,8595,111,119,110,97,114,114,111,119,115,59,1,8650,97,114,112,111,111,110,4,2,108,114,9184,9190,101,102,116,59,1,8643,105,103,104,116,59,1,8642,4,2,98,99,9203,9211,107,97,114,111,119,59,1,10512,4,2,111,114,9217,9222,114,110,59,1,8991,111,112,59,1,8972,4,3,99,111,116,9235,9248,9252,4,2,114,121,9241,9245,59,3,55349,56505,59,1,1109,108,59,1,10742,114,111,107,59,1,273,4,2,100,114,9264,9269,111,116,59,1,8945,105,4,2,59,102,9276,9278,1,9663,59,1,9662,4,2,97,104,9287,9292,114,114,59,1,8693,97,114,59,1,10607,97,110,103,108,101,59,1,10662,4,2,99,105,9311,9315,121,59,1,1119,103,114,97,114,114,59,1,10239,4,18,68,97,99,100,101,102,103,108,109,110,111,112,113,114,115,116,117,120,9361,9376,9398,9439,9444,9447,9462,9495,9531,9585,9598,9614,9659,9755,9771,9792,9808,9826,4,2,68,111,9367,9372,111,116,59,1,10871,116,59,1,8785,4,2,99,115,9382,9392,117,116,101,5,233,1,59,9390,1,233,116,101,114,59,1,10862,4,4,97,105,111,121,9408,9414,9430,9436,114,111,110,59,1,283,114,4,2,59,99,9421,9423,1,8790,5,234,1,59,9428,1,234,108,111,110,59,1,8789,59,1,1101,111,116,59,1,279,59,1,8519,4,2,68,114,9453,9458,111,116,59,1,8786,59,3,55349,56610,4,3,59,114,115,9470,9472,9482,1,10906,97,118,101,5,232,1,59,9480,1,232,4,2,59,100,9488,9490,1,10902,111,116,59,1,10904,4,4,59,105,108,115,9505,9507,9515,9518,1,10905,110,116,101,114,115,59,1,9191,59,1,8467,4,2,59,100,9524,9526,1,10901,111,116,59,1,10903,4,3,97,112,115,9539,9544,9564,99,114,59,1,275,116,121,4,3,59,115,118,9554,9556,9561,1,8709,101,116,59,1,8709,59,1,8709,112,4,2,49,59,9571,9583,4,2,51,52,9577,9580,59,1,8196,59,1,8197,1,8195,4,2,103,115,9591,9594,59,1,331,112,59,1,8194,4,2,103,112,9604,9609,111,110,59,1,281,102,59,3,55349,56662,4,3,97,108,115,9622,9635,9640,114,4,2,59,115,9629,9631,1,8917,108,59,1,10723,117,115,59,1,10865,105,4,3,59,108,118,9649,9651,9656,1,949,111,110,59,1,949,59,1,1013,4,4,99,115,117,118,9669,9686,9716,9747,4,2,105,111,9675,9680,114,99,59,1,8790,108,111,110,59,1,8789,4,2,105,108,9692,9696,109,59,1,8770,97,110,116,4,2,103,108,9705,9710,116,114,59,1,10902,101,115,115,59,1,10901,4,3,97,101,105,9724,9729,9734,108,115,59,1,61,115,116,59,1,8799,118,4,2,59,68,9741,9743,1,8801,68,59,1,10872,112,97,114,115,108,59,1,10725,4,2,68,97,9761,9766,111,116,59,1,8787,114,114,59,1,10609,4,3,99,100,105,9779,9783,9788,114,59,1,8495,111,116,59,1,8784,109,59,1,8770,4,2,97,104,9798,9801,59,1,951,5,240,1,59,9806,1,240,4,2,109,114,9814,9822,108,5,235,1,59,9820,1,235,111,59,1,8364,4,3,99,105,112,9834,9838,9843,108,59,1,33,115,116,59,1,8707,4,2,101,111,9849,9859,99,116,97,116,105,111,110,59,1,8496,110,101,110,116,105,97,108,101,59,1,8519,4,12,97,99,101,102,105,106,108,110,111,112,114,115,9896,9910,9914,9921,9954,9960,9967,9989,9994,10027,10036,10164,108,108,105,110,103,100,111,116,115,101,113,59,1,8786,121,59,1,1092,109,97,108,101,59,1,9792,4,3,105,108,114,9929,9935,9950,108,105,103,59,1,64259,4,2,105,108,9941,9945,103,59,1,64256,105,103,59,1,64260,59,3,55349,56611,108,105,103,59,1,64257,108,105,103,59,3,102,106,4,3,97,108,116,9975,9979,9984,116,59,1,9837,105,103,59,1,64258,110,115,59,1,9649,111,102,59,1,402,4,2,112,114,10000,10005,102,59,3,55349,56663,4,2,97,107,10011,10016,108,108,59,1,8704,4,2,59,118,10022,10024,1,8916,59,1,10969,97,114,116,105,110,116,59,1,10765,4,2,97,111,10042,10159,4,2,99,115,10048,10155,4,6,49,50,51,52,53,55,10062,10102,10114,10135,10139,10151,4,6,50,51,52,53,54,56,10076,10083,10086,10093,10096,10099,5,189,1,59,10081,1,189,59,1,8531,5,188,1,59,10091,1,188,59,1,8533,59,1,8537,59,1,8539,4,2,51,53,10108,10111,59,1,8532,59,1,8534,4,3,52,53,56,10122,10129,10132,5,190,1,59,10127,1,190,59,1,8535,59,1,8540,53,59,1,8536,4,2,54,56,10145,10148,59,1,8538,59,1,8541,56,59,1,8542,108,59,1,8260,119,110,59,1,8994,99,114,59,3,55349,56507,4,17,69,97,98,99,100,101,102,103,105,106,108,110,111,114,115,116,118,10206,10217,10247,10254,10268,10273,10358,10363,10374,10380,10385,10406,10458,10464,10470,10497,10610,4,2,59,108,10212,10214,1,8807,59,1,10892,4,3,99,109,112,10225,10231,10244,117,116,101,59,1,501,109,97,4,2,59,100,10239,10241,1,947,59,1,989,59,1,10886,114,101,118,101,59,1,287,4,2,105,121,10260,10265,114,99,59,1,285,59,1,1075,111,116,59,1,289,4,4,59,108,113,115,10283,10285,10288,10308,1,8805,59,1,8923,4,3,59,113,115,10296,10298,10301,1,8805,59,1,8807,108,97,110,116,59,1,10878,4,4,59,99,100,108,10318,10320,10324,10345,1,10878,99,59,1,10921,111,116,4,2,59,111,10332,10334,1,10880,4,2,59,108,10340,10342,1,10882,59,1,10884,4,2,59,101,10351,10354,3,8923,65024,115,59,1,10900,114,59,3,55349,56612,4,2,59,103,10369,10371,1,8811,59,1,8921,109,101,108,59,1,8503,99,121,59,1,1107,4,4,59,69,97,106,10395,10397,10400,10403,1,8823,59,1,10898,59,1,10917,59,1,10916,4,4,69,97,101,115,10416,10419,10434,10453,59,1,8809,112,4,2,59,112,10426,10428,1,10890,114,111,120,59,1,10890,4,2,59,113,10440,10442,1,10888,4,2,59,113,10448,10450,1,10888,59,1,8809,105,109,59,1,8935,112,102,59,3,55349,56664,97,118,101,59,1,96,4,2,99,105,10476,10480,114,59,1,8458,109,4,3,59,101,108,10489,10491,10494,1,8819,59,1,10894,59,1,10896,5,62,6,59,99,100,108,113,114,10512,10514,10527,10532,10538,10545,1,62,4,2,99,105,10520,10523,59,1,10919,114,59,1,10874,111,116,59,1,8919,80,97,114,59,1,10645,117,101,115,116,59,1,10876,4,5,97,100,101,108,115,10557,10574,10579,10599,10605,4,2,112,114,10563,10570,112,114,111,120,59,1,10886,114,59,1,10616,111,116,59,1,8919,113,4,2,108,113,10586,10592,101,115,115,59,1,8923,108,101,115,115,59,1,10892,101,115,115,59,1,8823,105,109,59,1,8819,4,2,101,110,10616,10626,114,116,110,101,113,113,59,3,8809,65024,69,59,3,8809,65024,4,10,65,97,98,99,101,102,107,111,115,121,10653,10658,10713,10718,10724,10760,10765,10786,10850,10875,114,114,59,1,8660,4,4,105,108,109,114,10668,10674,10678,10684,114,115,112,59,1,8202,102,59,1,189,105,108,116,59,1,8459,4,2,100,114,10690,10695,99,121,59,1,1098,4,3,59,99,119,10703,10705,10710,1,8596,105,114,59,1,10568,59,1,8621,97,114,59,1,8463,105,114,99,59,1,293,4,3,97,108,114,10732,10748,10754,114,116,115,4,2,59,117,10741,10743,1,9829,105,116,59,1,9829,108,105,112,59,1,8230,99,111,110,59,1,8889,114,59,3,55349,56613,115,4,2,101,119,10772,10779,97,114,111,119,59,1,10533,97,114,111,119,59,1,10534,4,5,97,109,111,112,114,10798,10803,10809,10839,10844,114,114,59,1,8703,116,104,116,59,1,8763,107,4,2,108,114,10816,10827,101,102,116,97,114,114,111,119,59,1,8617,105,103,104,116,97,114,114,111,119,59,1,8618,102,59,3,55349,56665,98,97,114,59,1,8213,4,3,99,108,116,10858,10863,10869,114,59,3,55349,56509,97,115,104,59,1,8463,114,111,107,59,1,295,4,2,98,112,10881,10887,117,108,108,59,1,8259,104,101,110,59,1,8208,4,15,97,99,101,102,103,105,106,109,110,111,112,113,115,116,117,10925,10936,10958,10977,10990,11001,11039,11045,11101,11192,11220,11226,11237,11285,11299,99,117,116,101,5,237,1,59,10934,1,237,4,3,59,105,121,10944,10946,10955,1,8291,114,99,5,238,1,59,10953,1,238,59,1,1080,4,2,99,120,10964,10968,121,59,1,1077,99,108,5,161,1,59,10975,1,161,4,2,102,114,10983,10986,59,1,8660,59,3,55349,56614,114,97,118,101,5,236,1,59,10999,1,236,4,4,59,105,110,111,11011,11013,11028,11034,1,8520,4,2,105,110,11019,11024,110,116,59,1,10764,116,59,1,8749,102,105,110,59,1,10716,116,97,59,1,8489,108,105,103,59,1,307,4,3,97,111,112,11053,11092,11096,4,3,99,103,116,11061,11065,11088,114,59,1,299,4,3,101,108,112,11073,11076,11082,59,1,8465,105,110,101,59,1,8464,97,114,116,59,1,8465,104,59,1,305,102,59,1,8887,101,100,59,1,437,4,5,59,99,102,111,116,11113,11115,11121,11136,11142,1,8712,97,114,101,59,1,8453,105,110,4,2,59,116,11129,11131,1,8734,105,101,59,1,10717,100,111,116,59,1,305,4,5,59,99,101,108,112,11154,11156,11161,11179,11186,1,8747,97,108,59,1,8890,4,2,103,114,11167,11173,101,114,115,59,1,8484,99,97,108,59,1,8890,97,114,104,107,59,1,10775,114,111,100,59,1,10812,4,4,99,103,112,116,11202,11206,11211,11216,121,59,1,1105,111,110,59,1,303,102,59,3,55349,56666,97,59,1,953,114,111,100,59,1,10812,117,101,115,116,5,191,1,59,11235,1,191,4,2,99,105,11243,11248,114,59,3,55349,56510,110,4,5,59,69,100,115,118,11261,11263,11266,11271,11282,1,8712,59,1,8953,111,116,59,1,8949,4,2,59,118,11277,11279,1,8948,59,1,8947,59,1,8712,4,2,59,105,11291,11293,1,8290,108,100,101,59,1,297,4,2,107,109,11305,11310,99,121,59,1,1110,108,5,239,1,59,11316,1,239,4,6,99,102,109,111,115,117,11332,11346,11351,11357,11363,11380,4,2,105,121,11338,11343,114,99,59,1,309,59,1,1081,114,59,3,55349,56615,97,116,104,59,1,567,112,102,59,3,55349,56667,4,2,99,101,11369,11374,114,59,3,55349,56511,114,99,121,59,1,1112,107,99,121,59,1,1108,4,8,97,99,102,103,104,106,111,115,11404,11418,11433,11438,11445,11450,11455,11461,112,112,97,4,2,59,118,11413,11415,1,954,59,1,1008,4,2,101,121,11424,11430,100,105,108,59,1,311,59,1,1082,114,59,3,55349,56616,114,101,101,110,59,1,312,99,121,59,1,1093,99,121,59,1,1116,112,102,59,3,55349,56668,99,114,59,3,55349,56512,4,23,65,66,69,72,97,98,99,100,101,102,103,104,106,108,109,110,111,112,114,115,116,117,118,11515,11538,11544,11555,11560,11721,11780,11818,11868,12136,12160,12171,12203,12208,12246,12275,12327,12509,12523,12569,12641,12732,12752,4,3,97,114,116,11523,11528,11532,114,114,59,1,8666,114,59,1,8656,97,105,108,59,1,10523,97,114,114,59,1,10510,4,2,59,103,11550,11552,1,8806,59,1,10891,97,114,59,1,10594,4,9,99,101,103,109,110,112,113,114,116,11580,11586,11594,11600,11606,11624,11627,11636,11694,117,116,101,59,1,314,109,112,116,121,118,59,1,10676,114,97,110,59,1,8466,98,100,97,59,1,955,103,4,3,59,100,108,11615,11617,11620,1,10216,59,1,10641,101,59,1,10216,59,1,10885,117,111,5,171,1,59,11634,1,171,114,4,8,59,98,102,104,108,112,115,116,11655,11657,11669,11673,11677,11681,11685,11690,1,8592,4,2,59,102,11663,11665,1,8676,115,59,1,10527,115,59,1,10525,107,59,1,8617,112,59,1,8619,108,59,1,10553,105,109,59,1,10611,108,59,1,8610,4,3,59,97,101,11702,11704,11709,1,10923,105,108,59,1,10521,4,2,59,115,11715,11717,1,10925,59,3,10925,65024,4,3,97,98,114,11729,11734,11739,114,114,59,1,10508,114,107,59,1,10098,4,2,97,107,11745,11758,99,4,2,101,107,11752,11755,59,1,123,59,1,91,4,2,101,115,11764,11767,59,1,10635,108,4,2,100,117,11774,11777,59,1,10639,59,1,10637,4,4,97,101,117,121,11790,11796,11811,11815,114,111,110,59,1,318,4,2,100,105,11802,11807,105,108,59,1,316,108,59,1,8968,98,59,1,123,59,1,1083,4,4,99,113,114,115,11828,11832,11845,11864,97,59,1,10550,117,111,4,2,59,114,11840,11842,1,8220,59,1,8222,4,2,100,117,11851,11857,104,97,114,59,1,10599,115,104,97,114,59,1,10571,104,59,1,8626,4,5,59,102,103,113,115,11880,11882,12008,12011,12031,1,8804,116,4,5,97,104,108,114,116,11895,11913,11935,11947,11996,114,114,111,119,4,2,59,116,11905,11907,1,8592,97,105,108,59,1,8610,97,114,112,111,111,110,4,2,100,117,11925,11931,111,119,110,59,1,8637,112,59,1,8636,101,102,116,97,114,114,111,119,115,59,1,8647,105,103,104,116,4,3,97,104,115,11959,11974,11984,114,114,111,119,4,2,59,115,11969,11971,1,8596,59,1,8646,97,114,112,111,111,110,115,59,1,8651,113,117,105,103,97,114,114,111,119,59,1,8621,104,114,101,101,116,105,109,101,115,59,1,8907,59,1,8922,4,3,59,113,115,12019,12021,12024,1,8804,59,1,8806,108,97,110,116,59,1,10877,4,5,59,99,100,103,115,12043,12045,12049,12070,12083,1,10877,99,59,1,10920,111,116,4,2,59,111,12057,12059,1,10879,4,2,59,114,12065,12067,1,10881,59,1,10883,4,2,59,101,12076,12079,3,8922,65024,115,59,1,10899,4,5,97,100,101,103,115,12095,12103,12108,12126,12131,112,112,114,111,120,59,1,10885,111,116,59,1,8918,113,4,2,103,113,12115,12120,116,114,59,1,8922,103,116,114,59,1,10891,116,114,59,1,8822,105,109,59,1,8818,4,3,105,108,114,12144,12150,12156,115,104,116,59,1,10620,111,111,114,59,1,8970,59,3,55349,56617,4,2,59,69,12166,12168,1,8822,59,1,10897,4,2,97,98,12177,12198,114,4,2,100,117,12184,12187,59,1,8637,4,2,59,108,12193,12195,1,8636,59,1,10602,108,107,59,1,9604,99,121,59,1,1113,4,5,59,97,99,104,116,12220,12222,12227,12235,12241,1,8810,114,114,59,1,8647,111,114,110,101,114,59,1,8990,97,114,100,59,1,10603,114,105,59,1,9722,4,2,105,111,12252,12258,100,111,116,59,1,320,117,115,116,4,2,59,97,12267,12269,1,9136,99,104,101,59,1,9136,4,4,69,97,101,115,12285,12288,12303,12322,59,1,8808,112,4,2,59,112,12295,12297,1,10889,114,111,120,59,1,10889,4,2,59,113,12309,12311,1,10887,4,2,59,113,12317,12319,1,10887,59,1,8808,105,109,59,1,8934,4,8,97,98,110,111,112,116,119,122,12345,12359,12364,12421,12446,12467,12474,12490,4,2,110,114,12351,12355,103,59,1,10220,114,59,1,8701,114,107,59,1,10214,103,4,3,108,109,114,12373,12401,12409,101,102,116,4,2,97,114,12382,12389,114,114,111,119,59,1,10229,105,103,104,116,97,114,114,111,119,59,1,10231,97,112,115,116,111,59,1,10236,105,103,104,116,97,114,114,111,119,59,1,10230,112,97,114,114,111,119,4,2,108,114,12433,12439,101,102,116,59,1,8619,105,103,104,116,59,1,8620,4,3,97,102,108,12454,12458,12462,114,59,1,10629,59,3,55349,56669,117,115,59,1,10797,105,109,101,115,59,1,10804,4,2,97,98,12480,12485,115,116,59,1,8727,97,114,59,1,95,4,3,59,101,102,12498,12500,12506,1,9674,110,103,101,59,1,9674,59,1,10731,97,114,4,2,59,108,12517,12519,1,40,116,59,1,10643,4,5,97,99,104,109,116,12535,12540,12548,12561,12564,114,114,59,1,8646,111,114,110,101,114,59,1,8991,97,114,4,2,59,100,12556,12558,1,8651,59,1,10605,59,1,8206,114,105,59,1,8895,4,6,97,99,104,105,113,116,12583,12589,12594,12597,12614,12635,113,117,111,59,1,8249,114,59,3,55349,56513,59,1,8624,109,4,3,59,101,103,12606,12608,12611,1,8818,59,1,10893,59,1,10895,4,2,98,117,12620,12623,59,1,91,111,4,2,59,114,12630,12632,1,8216,59,1,8218,114,111,107,59,1,322,5,60,8,59,99,100,104,105,108,113,114,12660,12662,12675,12680,12686,12692,12698,12705,1,60,4,2,99,105,12668,12671,59,1,10918,114,59,1,10873,111,116,59,1,8918,114,101,101,59,1,8907,109,101,115,59,1,8905,97,114,114,59,1,10614,117,101,115,116,59,1,10875,4,2,80,105,12711,12716,97,114,59,1,10646,4,3,59,101,102,12724,12726,12729,1,9667,59,1,8884,59,1,9666,114,4,2,100,117,12739,12746,115,104,97,114,59,1,10570,104,97,114,59,1,10598,4,2,101,110,12758,12768,114,116,110,101,113,113,59,3,8808,65024,69,59,3,8808,65024,4,14,68,97,99,100,101,102,104,105,108,110,111,112,115,117,12803,12809,12893,12908,12914,12928,12933,12937,13011,13025,13032,13049,13052,13069,68,111,116,59,1,8762,4,4,99,108,112,114,12819,12827,12849,12887,114,5,175,1,59,12825,1,175,4,2,101,116,12833,12836,59,1,9794,4,2,59,101,12842,12844,1,10016,115,101,59,1,10016,4,2,59,115,12855,12857,1,8614,116,111,4,4,59,100,108,117,12869,12871,12877,12883,1,8614,111,119,110,59,1,8615,101,102,116,59,1,8612,112,59,1,8613,107,101,114,59,1,9646,4,2,111,121,12899,12905,109,109,97,59,1,10793,59,1,1084,97,115,104,59,1,8212,97,115,117,114,101,100,97,110,103,108,101,59,1,8737,114,59,3,55349,56618,111,59,1,8487,4,3,99,100,110,12945,12954,12985,114,111,5,181,1,59,12952,1,181,4,4,59,97,99,100,12964,12966,12971,12976,1,8739,115,116,59,1,42,105,114,59,1,10992,111,116,5,183,1,59,12983,1,183,117,115,4,3,59,98,100,12995,12997,13000,1,8722,59,1,8863,4,2,59,117,13006,13008,1,8760,59,1,10794,4,2,99,100,13017,13021,112,59,1,10971,114,59,1,8230,112,108,117,115,59,1,8723,4,2,100,112,13038,13044,101,108,115,59,1,8871,102,59,3,55349,56670,59,1,8723,4,2,99,116,13058,13063,114,59,3,55349,56514,112,111,115,59,1,8766,4,3,59,108,109,13077,13079,13087,1,956,116,105,109,97,112,59,1,8888,97,112,59,1,8888,4,24,71,76,82,86,97,98,99,100,101,102,103,104,105,106,108,109,111,112,114,115,116,117,118,119,13142,13165,13217,13229,13247,13330,13359,13414,13420,13508,13513,13579,13602,13626,13631,13762,13767,13855,13936,13995,14214,14285,14312,14432,4,2,103,116,13148,13152,59,3,8921,824,4,2,59,118,13158,13161,3,8811,8402,59,3,8811,824,4,3,101,108,116,13173,13200,13204,102,116,4,2,97,114,13181,13188,114,114,111,119,59,1,8653,105,103,104,116,97,114,114,111,119,59,1,8654,59,3,8920,824,4,2,59,118,13210,13213,3,8810,8402,59,3,8810,824,105,103,104,116,97,114,114,111,119,59,1,8655,4,2,68,100,13235,13241,97,115,104,59,1,8879,97,115,104,59,1,8878,4,5,98,99,110,112,116,13259,13264,13270,13275,13308,108,97,59,1,8711,117,116,101,59,1,324,103,59,3,8736,8402,4,5,59,69,105,111,112,13287,13289,13293,13298,13302,1,8777,59,3,10864,824,100,59,3,8779,824,115,59,1,329,114,111,120,59,1,8777,117,114,4,2,59,97,13316,13318,1,9838,108,4,2,59,115,13325,13327,1,9838,59,1,8469,4,2,115,117,13336,13344,112,5,160,1,59,13342,1,160,109,112,4,2,59,101,13352,13355,3,8782,824,59,3,8783,824,4,5,97,101,111,117,121,13371,13385,13391,13407,13411,4,2,112,114,13377,13380,59,1,10819,111,110,59,1,328,100,105,108,59,1,326,110,103,4,2,59,100,13399,13401,1,8775,111,116,59,3,10861,824,112,59,1,10818,59,1,1085,97,115,104,59,1,8211,4,7,59,65,97,100,113,115,120,13436,13438,13443,13466,13472,13478,13494,1,8800,114,114,59,1,8663,114,4,2,104,114,13450,13454,107,59,1,10532,4,2,59,111,13460,13462,1,8599,119,59,1,8599,111,116,59,3,8784,824,117,105,118,59,1,8802,4,2,101,105,13484,13489,97,114,59,1,10536,109,59,3,8770,824,105,115,116,4,2,59,115,13503,13505,1,8708,59,1,8708,114,59,3,55349,56619,4,4,69,101,115,116,13523,13527,13563,13568,59,3,8807,824,4,3,59,113,115,13535,13537,13559,1,8817,4,3,59,113,115,13545,13547,13551,1,8817,59,3,8807,824,108,97,110,116,59,3,10878,824,59,3,10878,824,105,109,59,1,8821,4,2,59,114,13574,13576,1,8815,59,1,8815,4,3,65,97,112,13587,13592,13597,114,114,59,1,8654,114,114,59,1,8622,97,114,59,1,10994,4,3,59,115,118,13610,13612,13623,1,8715,4,2,59,100,13618,13620,1,8956,59,1,8954,59,1,8715,99,121,59,1,1114,4,7,65,69,97,100,101,115,116,13647,13652,13656,13661,13665,13737,13742,114,114,59,1,8653,59,3,8806,824,114,114,59,1,8602,114,59,1,8229,4,4,59,102,113,115,13675,13677,13703,13725,1,8816,116,4,2,97,114,13684,13691,114,114,111,119,59,1,8602,105,103,104,116,97,114,114,111,119,59,1,8622,4,3,59,113,115,13711,13713,13717,1,8816,59,3,8806,824,108,97,110,116,59,3,10877,824,4,2,59,115,13731,13734,3,10877,824,59,1,8814,105,109,59,1,8820,4,2,59,114,13748,13750,1,8814,105,4,2,59,101,13757,13759,1,8938,59,1,8940,105,100,59,1,8740,4,2,112,116,13773,13778,102,59,3,55349,56671,5,172,3,59,105,110,13787,13789,13829,1,172,110,4,4,59,69,100,118,13800,13802,13806,13812,1,8713,59,3,8953,824,111,116,59,3,8949,824,4,3,97,98,99,13820,13823,13826,59,1,8713,59,1,8951,59,1,8950,105,4,2,59,118,13836,13838,1,8716,4,3,97,98,99,13846,13849,13852,59,1,8716,59,1,8958,59,1,8957,4,3,97,111,114,13863,13892,13899,114,4,4,59,97,115,116,13874,13876,13883,13888,1,8742,108,108,101,108,59,1,8742,108,59,3,11005,8421,59,3,8706,824,108,105,110,116,59,1,10772,4,3,59,99,101,13907,13909,13914,1,8832,117,101,59,1,8928,4,2,59,99,13920,13923,3,10927,824,4,2,59,101,13929,13931,1,8832,113,59,3,10927,824,4,4,65,97,105,116,13946,13951,13971,13982,114,114,59,1,8655,114,114,4,3,59,99,119,13961,13963,13967,1,8603,59,3,10547,824,59,3,8605,824,103,104,116,97,114,114,111,119,59,1,8603,114,105,4,2,59,101,13990,13992,1,8939,59,1,8941,4,7,99,104,105,109,112,113,117,14011,14036,14060,14080,14085,14090,14106,4,4,59,99,101,114,14021,14023,14028,14032,1,8833,117,101,59,1,8929,59,3,10928,824,59,3,55349,56515,111,114,116,4,2,109,112,14045,14050,105,100,59,1,8740,97,114,97,108,108,101,108,59,1,8742,109,4,2,59,101,14067,14069,1,8769,4,2,59,113,14075,14077,1,8772,59,1,8772,105,100,59,1,8740,97,114,59,1,8742,115,117,4,2,98,112,14098,14102,101,59,1,8930,101,59,1,8931,4,3,98,99,112,14114,14157,14171,4,4,59,69,101,115,14124,14126,14130,14133,1,8836,59,3,10949,824,59,1,8840,101,116,4,2,59,101,14141,14144,3,8834,8402,113,4,2,59,113,14151,14153,1,8840,59,3,10949,824,99,4,2,59,101,14164,14166,1,8833,113,59,3,10928,824,4,4,59,69,101,115,14181,14183,14187,14190,1,8837,59,3,10950,824,59,1,8841,101,116,4,2,59,101,14198,14201,3,8835,8402,113,4,2,59,113,14208,14210,1,8841,59,3,10950,824,4,4,103,105,108,114,14224,14228,14238,14242,108,59,1,8825,108,100,101,5,241,1,59,14236,1,241,103,59,1,8824,105,97,110,103,108,101,4,2,108,114,14254,14269,101,102,116,4,2,59,101,14263,14265,1,8938,113,59,1,8940,105,103,104,116,4,2,59,101,14279,14281,1,8939,113,59,1,8941,4,2,59,109,14291,14293,1,957,4,3,59,101,115,14301,14303,14308,1,35,114,111,59,1,8470,112,59,1,8199,4,9,68,72,97,100,103,105,108,114,115,14332,14338,14344,14349,14355,14369,14376,14408,14426,97,115,104,59,1,8877,97,114,114,59,1,10500,112,59,3,8781,8402,97,115,104,59,1,8876,4,2,101,116,14361,14365,59,3,8805,8402,59,3,62,8402,110,102,105,110,59,1,10718,4,3,65,101,116,14384,14389,14393,114,114,59,1,10498,59,3,8804,8402,4,2,59,114,14399,14402,3,60,8402,105,101,59,3,8884,8402,4,2,65,116,14414,14419,114,114,59,1,10499,114,105,101,59,3,8885,8402,105,109,59,3,8764,8402,4,3,65,97,110,14440,14445,14468,114,114,59,1,8662,114,4,2,104,114,14452,14456,107,59,1,10531,4,2,59,111,14462,14464,1,8598,119,59,1,8598,101,97,114,59,1,10535,4,18,83,97,99,100,101,102,103,104,105,108,109,111,112,114,115,116,117,118,14512,14515,14535,14560,14597,14603,14618,14643,14657,14662,14701,14741,14747,14769,14851,14877,14907,14916,59,1,9416,4,2,99,115,14521,14531,117,116,101,5,243,1,59,14529,1,243,116,59,1,8859,4,2,105,121,14541,14557,114,4,2,59,99,14548,14550,1,8858,5,244,1,59,14555,1,244,59,1,1086,4,5,97,98,105,111,115,14572,14577,14583,14587,14591,115,104,59,1,8861,108,97,99,59,1,337,118,59,1,10808,116,59,1,8857,111,108,100,59,1,10684,108,105,103,59,1,339,4,2,99,114,14609,14614,105,114,59,1,10687,59,3,55349,56620,4,3,111,114,116,14626,14630,14640,110,59,1,731,97,118,101,5,242,1,59,14638,1,242,59,1,10689,4,2,98,109,14649,14654,97,114,59,1,10677,59,1,937,110,116,59,1,8750,4,4,97,99,105,116,14672,14677,14693,14698,114,114,59,1,8634,4,2,105,114,14683,14687,114,59,1,10686,111,115,115,59,1,10683,110,101,59,1,8254,59,1,10688,4,3,97,101,105,14709,14714,14719,99,114,59,1,333,103,97,59,1,969,4,3,99,100,110,14727,14733,14736,114,111,110,59,1,959,59,1,10678,117,115,59,1,8854,112,102,59,3,55349,56672,4,3,97,101,108,14755,14759,14764,114,59,1,10679,114,112,59,1,10681,117,115,59,1,8853,4,7,59,97,100,105,111,115,118,14785,14787,14792,14831,14837,14841,14848,1,8744,114,114,59,1,8635,4,4,59,101,102,109,14802,14804,14817,14824,1,10845,114,4,2,59,111,14811,14813,1,8500,102,59,1,8500,5,170,1,59,14822,1,170,5,186,1,59,14829,1,186,103,111,102,59,1,8886,114,59,1,10838,108,111,112,101,59,1,10839,59,1,10843,4,3,99,108,111,14859,14863,14873,114,59,1,8500,97,115,104,5,248,1,59,14871,1,248,108,59,1,8856,105,4,2,108,109,14884,14893,100,101,5,245,1,59,14891,1,245,101,115,4,2,59,97,14901,14903,1,8855,115,59,1,10806,109,108,5,246,1,59,14914,1,246,98,97,114,59,1,9021,4,12,97,99,101,102,104,105,108,109,111,114,115,117,14948,14992,14996,15033,15038,15068,15090,15189,15192,15222,15427,15441,114,4,4,59,97,115,116,14959,14961,14976,14989,1,8741,5,182,2,59,108,14968,14970,1,182,108,101,108,59,1,8741,4,2,105,108,14982,14986,109,59,1,10995,59,1,11005,59,1,8706,121,59,1,1087,114,4,5,99,105,109,112,116,15009,15014,15019,15024,15027,110,116,59,1,37,111,100,59,1,46,105,108,59,1,8240,59,1,8869,101,110,107,59,1,8241,114,59,3,55349,56621,4,3,105,109,111,15046,15057,15063,4,2,59,118,15052,15054,1,966,59,1,981,109,97,116,59,1,8499,110,101,59,1,9742,4,3,59,116,118,15076,15078,15087,1,960,99,104,102,111,114,107,59,1,8916,59,1,982,4,2,97,117,15096,15119,110,4,2,99,107,15103,15115,107,4,2,59,104,15110,15112,1,8463,59,1,8462,118,59,1,8463,115,4,9,59,97,98,99,100,101,109,115,116,15140,15142,15148,15151,15156,15168,15171,15179,15184,1,43,99,105,114,59,1,10787,59,1,8862,105,114,59,1,10786,4,2,111,117,15162,15165,59,1,8724,59,1,10789,59,1,10866,110,5,177,1,59,15177,1,177,105,109,59,1,10790,119,111,59,1,10791,59,1,177,4,3,105,112,117,15200,15208,15213,110,116,105,110,116,59,1,10773,102,59,3,55349,56673,110,100,5,163,1,59,15220,1,163,4,10,59,69,97,99,101,105,110,111,115,117,15244,15246,15249,15253,15258,15334,15347,15367,15416,15421,1,8826,59,1,10931,112,59,1,10935,117,101,59,1,8828,4,2,59,99,15264,15266,1,10927,4,6,59,97,99,101,110,115,15280,15282,15290,15299,15303,15329,1,8826,112,112,114,111,120,59,1,10935,117,114,108,121,101,113,59,1,8828,113,59,1,10927,4,3,97,101,115,15311,15319,15324,112,112,114,111,120,59,1,10937,113,113,59,1,10933,105,109,59,1,8936,105,109,59,1,8830,109,101,4,2,59,115,15342,15344,1,8242,59,1,8473,4,3,69,97,115,15355,15358,15362,59,1,10933,112,59,1,10937,105,109,59,1,8936,4,3,100,102,112,15375,15378,15404,59,1,8719,4,3,97,108,115,15386,15392,15398,108,97,114,59,1,9006,105,110,101,59,1,8978,117,114,102,59,1,8979,4,2,59,116,15410,15412,1,8733,111,59,1,8733,105,109,59,1,8830,114,101,108,59,1,8880,4,2,99,105,15433,15438,114,59,3,55349,56517,59,1,968,110,99,115,112,59,1,8200,4,6,102,105,111,112,115,117,15462,15467,15472,15478,15485,15491,114,59,3,55349,56622,110,116,59,1,10764,112,102,59,3,55349,56674,114,105,109,101,59,1,8279,99,114,59,3,55349,56518,4,3,97,101,111,15499,15520,15534,116,4,2,101,105,15506,15515,114,110,105,111,110,115,59,1,8461,110,116,59,1,10774,115,116,4,2,59,101,15528,15530,1,63,113,59,1,8799,116,5,34,1,59,15540,1,34,4,21,65,66,72,97,98,99,100,101,102,104,105,108,109,110,111,112,114,115,116,117,120,15586,15609,15615,15620,15796,15855,15893,15931,15977,16001,16039,16183,16204,16222,16228,16285,16312,16318,16363,16408,16416,4,3,97,114,116,15594,15599,15603,114,114,59,1,8667,114,59,1,8658,97,105,108,59,1,10524,97,114,114,59,1,10511,97,114,59,1,10596,4,7,99,100,101,110,113,114,116,15636,15651,15656,15664,15687,15696,15770,4,2,101,117,15642,15646,59,3,8765,817,116,101,59,1,341,105,99,59,1,8730,109,112,116,121,118,59,1,10675,103,4,4,59,100,101,108,15675,15677,15680,15683,1,10217,59,1,10642,59,1,10661,101,59,1,10217,117,111,5,187,1,59,15694,1,187,114,4,11,59,97,98,99,102,104,108,112,115,116,119,15721,15723,15727,15739,15742,15746,15750,15754,15758,15763,15767,1,8594,112,59,1,10613,4,2,59,102,15733,15735,1,8677,115,59,1,10528,59,1,10547,115,59,1,10526,107,59,1,8618,112,59,1,8620,108,59,1,10565,105,109,59,1,10612,108,59,1,8611,59,1,8605,4,2,97,105,15776,15781,105,108,59,1,10522,111,4,2,59,110,15788,15790,1,8758,97,108,115,59,1,8474,4,3,97,98,114,15804,15809,15814,114,114,59,1,10509,114,107,59,1,10099,4,2,97,107,15820,15833,99,4,2,101,107,15827,15830,59,1,125,59,1,93,4,2,101,115,15839,15842,59,1,10636,108,4,2,100,117,15849,15852,59,1,10638,59,1,10640,4,4,97,101,117,121,15865,15871,15886,15890,114,111,110,59,1,345,4,2,100,105,15877,15882,105,108,59,1,343,108,59,1,8969,98,59,1,125,59,1,1088,4,4,99,108,113,115,15903,15907,15914,15927,97,59,1,10551,100,104,97,114,59,1,10601,117,111,4,2,59,114,15922,15924,1,8221,59,1,8221,104,59,1,8627,4,3,97,99,103,15939,15966,15970,108,4,4,59,105,112,115,15950,15952,15957,15963,1,8476,110,101,59,1,8475,97,114,116,59,1,8476,59,1,8477,116,59,1,9645,5,174,1,59,15975,1,174,4,3,105,108,114,15985,15991,15997,115,104,116,59,1,10621,111,111,114,59,1,8971,59,3,55349,56623,4,2,97,111,16007,16028,114,4,2,100,117,16014,16017,59,1,8641,4,2,59,108,16023,16025,1,8640,59,1,10604,4,2,59,118,16034,16036,1,961,59,1,1009,4,3,103,110,115,16047,16167,16171,104,116,4,6,97,104,108,114,115,116,16063,16081,16103,16130,16143,16155,114,114,111,119,4,2,59,116,16073,16075,1,8594,97,105,108,59,1,8611,97,114,112,111,111,110,4,2,100,117,16093,16099,111,119,110,59,1,8641,112,59,1,8640,101,102,116,4,2,97,104,16112,16120,114,114,111,119,115,59,1,8644,97,114,112,111,111,110,115,59,1,8652,105,103,104,116,97,114,114,111,119,115,59,1,8649,113,117,105,103,97,114,114,111,119,59,1,8605,104,114,101,101,116,105,109,101,115,59,1,8908,103,59,1,730,105,110,103,100,111,116,115,101,113,59,1,8787,4,3,97,104,109,16191,16196,16201,114,114,59,1,8644,97,114,59,1,8652,59,1,8207,111,117,115,116,4,2,59,97,16214,16216,1,9137,99,104,101,59,1,9137,109,105,100,59,1,10990,4,4,97,98,112,116,16238,16252,16257,16278,4,2,110,114,16244,16248,103,59,1,10221,114,59,1,8702,114,107,59,1,10215,4,3,97,102,108,16265,16269,16273,114,59,1,10630,59,3,55349,56675,117,115,59,1,10798,105,109,101,115,59,1,10805,4,2,97,112,16291,16304,114,4,2,59,103,16298,16300,1,41,116,59,1,10644,111,108,105,110,116,59,1,10770,97,114,114,59,1,8649,4,4,97,99,104,113,16328,16334,16339,16342,113,117,111,59,1,8250,114,59,3,55349,56519,59,1,8625,4,2,98,117,16348,16351,59,1,93,111,4,2,59,114,16358,16360,1,8217,59,1,8217,4,3,104,105,114,16371,16377,16383,114,101,101,59,1,8908,109,101,115,59,1,8906,105,4,4,59,101,102,108,16394,16396,16399,16402,1,9657,59,1,8885,59,1,9656,116,114,105,59,1,10702,108,117,104,97,114,59,1,10600,59,1,8478,4,19,97,98,99,100,101,102,104,105,108,109,111,112,113,114,115,116,117,119,122,16459,16466,16472,16572,16590,16672,16687,16746,16844,16850,16924,16963,16988,17115,17121,17154,17206,17614,17656,99,117,116,101,59,1,347,113,117,111,59,1,8218,4,10,59,69,97,99,101,105,110,112,115,121,16494,16496,16499,16513,16518,16531,16536,16556,16564,16569,1,8827,59,1,10932,4,2,112,114,16505,16508,59,1,10936,111,110,59,1,353,117,101,59,1,8829,4,2,59,100,16524,16526,1,10928,105,108,59,1,351,114,99,59,1,349,4,3,69,97,115,16544,16547,16551,59,1,10934,112,59,1,10938,105,109,59,1,8937,111,108,105,110,116,59,1,10771,105,109,59,1,8831,59,1,1089,111,116,4,3,59,98,101,16582,16584,16587,1,8901,59,1,8865,59,1,10854,4,7,65,97,99,109,115,116,120,16606,16611,16634,16642,16646,16652,16668,114,114,59,1,8664,114,4,2,104,114,16618,16622,107,59,1,10533,4,2,59,111,16628,16630,1,8600,119,59,1,8600,116,5,167,1,59,16640,1,167,105,59,1,59,119,97,114,59,1,10537,109,4,2,105,110,16659,16665,110,117,115,59,1,8726,59,1,8726,116,59,1,10038,114,4,2,59,111,16679,16682,3,55349,56624,119,110,59,1,8994,4,4,97,99,111,121,16697,16702,16716,16739,114,112,59,1,9839,4,2,104,121,16708,16713,99,121,59,1,1097,59,1,1096,114,116,4,2,109,112,16724,16729,105,100,59,1,8739,97,114,97,108,108,101,108,59,1,8741,5,173,1,59,16744,1,173,4,2,103,109,16752,16770,109,97,4,3,59,102,118,16762,16764,16767,1,963,59,1,962,59,1,962,4,8,59,100,101,103,108,110,112,114,16788,16790,16795,16806,16817,16828,16832,16838,1,8764,111,116,59,1,10858,4,2,59,113,16801,16803,1,8771,59,1,8771,4,2,59,69,16812,16814,1,10910,59,1,10912,4,2,59,69,16823,16825,1,10909,59,1,10911,101,59,1,8774,108,117,115,59,1,10788,97,114,114,59,1,10610,97,114,114,59,1,8592,4,4,97,101,105,116,16860,16883,16891,16904,4,2,108,115,16866,16878,108,115,101,116,109,105,110,117,115,59,1,8726,104,112,59,1,10803,112,97,114,115,108,59,1,10724,4,2,100,108,16897,16900,59,1,8739,101,59,1,8995,4,2,59,101,16910,16912,1,10922,4,2,59,115,16918,16920,1,10924,59,3,10924,65024,4,3,102,108,112,16932,16938,16958,116,99,121,59,1,1100,4,2,59,98,16944,16946,1,47,4,2,59,97,16952,16954,1,10692,114,59,1,9023,102,59,3,55349,56676,97,4,2,100,114,16970,16985,101,115,4,2,59,117,16978,16980,1,9824,105,116,59,1,9824,59,1,8741,4,3,99,115,117,16996,17028,17089,4,2,97,117,17002,17015,112,4,2,59,115,17009,17011,1,8851,59,3,8851,65024,112,4,2,59,115,17022,17024,1,8852,59,3,8852,65024,117,4,2,98,112,17035,17062,4,3,59,101,115,17043,17045,17048,1,8847,59,1,8849,101,116,4,2,59,101,17056,17058,1,8847,113,59,1,8849,4,3,59,101,115,17070,17072,17075,1,8848,59,1,8850,101,116,4,2,59,101,17083,17085,1,8848,113,59,1,8850,4,3,59,97,102,17097,17099,17112,1,9633,114,4,2,101,102,17106,17109,59,1,9633,59,1,9642,59,1,9642,97,114,114,59,1,8594,4,4,99,101,109,116,17131,17136,17142,17148,114,59,3,55349,56520,116,109,110,59,1,8726,105,108,101,59,1,8995,97,114,102,59,1,8902,4,2,97,114,17160,17172,114,4,2,59,102,17167,17169,1,9734,59,1,9733,4,2,97,110,17178,17202,105,103,104,116,4,2,101,112,17188,17197,112,115,105,108,111,110,59,1,1013,104,105,59,1,981,115,59,1,175,4,5,98,99,109,110,112,17218,17351,17420,17423,17427,4,9,59,69,100,101,109,110,112,114,115,17238,17240,17243,17248,17261,17267,17279,17285,17291,1,8834,59,1,10949,111,116,59,1,10941,4,2,59,100,17254,17256,1,8838,111,116,59,1,10947,117,108,116,59,1,10945,4,2,69,101,17273,17276,59,1,10955,59,1,8842,108,117,115,59,1,10943,97,114,114,59,1,10617,4,3,101,105,117,17299,17335,17339,116,4,3,59,101,110,17308,17310,17322,1,8834,113,4,2,59,113,17317,17319,1,8838,59,1,10949,101,113,4,2,59,113,17330,17332,1,8842,59,1,10955,109,59,1,10951,4,2,98,112,17345,17348,59,1,10965,59,1,10963,99,4,6,59,97,99,101,110,115,17366,17368,17376,17385,17389,17415,1,8827,112,112,114,111,120,59,1,10936,117,114,108,121,101,113,59,1,8829,113,59,1,10928,4,3,97,101,115,17397,17405,17410,112,112,114,111,120,59,1,10938,113,113,59,1,10934,105,109,59,1,8937,105,109,59,1,8831,59,1,8721,103,59,1,9834,4,13,49,50,51,59,69,100,101,104,108,109,110,112,115,17455,17462,17469,17476,17478,17481,17496,17509,17524,17530,17536,17548,17554,5,185,1,59,17460,1,185,5,178,1,59,17467,1,178,5,179,1,59,17474,1,179,1,8835,59,1,10950,4,2,111,115,17487,17491,116,59,1,10942,117,98,59,1,10968,4,2,59,100,17502,17504,1,8839,111,116,59,1,10948,115,4,2,111,117,17516,17520,108,59,1,10185,98,59,1,10967,97,114,114,59,1,10619,117,108,116,59,1,10946,4,2,69,101,17542,17545,59,1,10956,59,1,8843,108,117,115,59,1,10944,4,3,101,105,117,17562,17598,17602,116,4,3,59,101,110,17571,17573,17585,1,8835,113,4,2,59,113,17580,17582,1,8839,59,1,10950,101,113,4,2,59,113,17593,17595,1,8843,59,1,10956,109,59,1,10952,4,2,98,112,17608,17611,59,1,10964,59,1,10966,4,3,65,97,110,17622,17627,17650,114,114,59,1,8665,114,4,2,104,114,17634,17638,107,59,1,10534,4,2,59,111,17644,17646,1,8601,119,59,1,8601,119,97,114,59,1,10538,108,105,103,5,223,1,59,17664,1,223,4,13,97,98,99,100,101,102,104,105,111,112,114,115,119,17694,17709,17714,17737,17742,17749,17754,17860,17905,17957,17964,18090,18122,4,2,114,117,17700,17706,103,101,116,59,1,8982,59,1,964,114,107,59,1,9140,4,3,97,101,121,17722,17728,17734,114,111,110,59,1,357,100,105,108,59,1,355,59,1,1090,111,116,59,1,8411,108,114,101,99,59,1,8981,114,59,3,55349,56625,4,4,101,105,107,111,17764,17805,17836,17851,4,2,114,116,17770,17786,101,4,2,52,102,17777,17780,59,1,8756,111,114,101,59,1,8756,97,4,3,59,115,118,17795,17797,17802,1,952,121,109,59,1,977,59,1,977,4,2,99,110,17811,17831,107,4,2,97,115,17818,17826,112,112,114,111,120,59,1,8776,105,109,59,1,8764,115,112,59,1,8201,4,2,97,115,17842,17846,112,59,1,8776,105,109,59,1,8764,114,110,5,254,1,59,17858,1,254,4,3,108,109,110,17868,17873,17901,100,101,59,1,732,101,115,5,215,3,59,98,100,17884,17886,17898,1,215,4,2,59,97,17892,17894,1,8864,114,59,1,10801,59,1,10800,116,59,1,8749,4,3,101,112,115,17913,17917,17953,97,59,1,10536,4,4,59,98,99,102,17927,17929,17934,17939,1,8868,111,116,59,1,9014,105,114,59,1,10993,4,2,59,111,17945,17948,3,55349,56677,114,107,59,1,10970,97,59,1,10537,114,105,109,101,59,1,8244,4,3,97,105,112,17972,17977,18082,100,101,59,1,8482,4,7,97,100,101,109,112,115,116,17993,18051,18056,18059,18066,18072,18076,110,103,108,101,4,5,59,100,108,113,114,18009,18011,18017,18032,18035,1,9653,111,119,110,59,1,9663,101,102,116,4,2,59,101,18026,18028,1,9667,113,59,1,8884,59,1,8796,105,103,104,116,4,2,59,101,18045,18047,1,9657,113,59,1,8885,111,116,59,1,9708,59,1,8796,105,110,117,115,59,1,10810,108,117,115,59,1,10809,98,59,1,10701,105,109,101,59,1,10811,101,122,105,117,109,59,1,9186,4,3,99,104,116,18098,18111,18116,4,2,114,121,18104,18108,59,3,55349,56521,59,1,1094,99,121,59,1,1115,114,111,107,59,1,359,4,2,105,111,18128,18133,120,116,59,1,8812,104,101,97,100,4,2,108,114,18143,18154,101,102,116,97,114,114,111,119,59,1,8606,105,103,104,116,97,114,114,111,119,59,1,8608,4,18,65,72,97,98,99,100,102,103,104,108,109,111,112,114,115,116,117,119,18204,18209,18214,18234,18250,18268,18292,18308,18319,18343,18379,18397,18413,18504,18547,18553,18584,18603,114,114,59,1,8657,97,114,59,1,10595,4,2,99,114,18220,18230,117,116,101,5,250,1,59,18228,1,250,114,59,1,8593,114,4,2,99,101,18241,18245,121,59,1,1118,118,101,59,1,365,4,2,105,121,18256,18265,114,99,5,251,1,59,18263,1,251,59,1,1091,4,3,97,98,104,18276,18281,18287,114,114,59,1,8645,108,97,99,59,1,369,97,114,59,1,10606,4,2,105,114,18298,18304,115,104,116,59,1,10622,59,3,55349,56626,114,97,118,101,5,249,1,59,18317,1,249,4,2,97,98,18325,18338,114,4,2,108,114,18332,18335,59,1,8639,59,1,8638,108,107,59,1,9600,4,2,99,116,18349,18374,4,2,111,114,18355,18369,114,110,4,2,59,101,18363,18365,1,8988,114,59,1,8988,111,112,59,1,8975,114,105,59,1,9720,4,2,97,108,18385,18390,99,114,59,1,363,5,168,1,59,18395,1,168,4,2,103,112,18403,18408,111,110,59,1,371,102,59,3,55349,56678,4,6,97,100,104,108,115,117,18427,18434,18445,18470,18475,18494,114,114,111,119,59,1,8593,111,119,110,97,114,114,111,119,59,1,8597,97,114,112,111,111,110,4,2,108,114,18457,18463,101,102,116,59,1,8639,105,103,104,116,59,1,8638,117,115,59,1,8846,105,4,3,59,104,108,18484,18486,18489,1,965,59,1,978,111,110,59,1,965,112,97,114,114,111,119,115,59,1,8648,4,3,99,105,116,18512,18537,18542,4,2,111,114,18518,18532,114,110,4,2,59,101,18526,18528,1,8989,114,59,1,8989,111,112,59,1,8974,110,103,59,1,367,114,105,59,1,9721,99,114,59,3,55349,56522,4,3,100,105,114,18561,18566,18572,111,116,59,1,8944,108,100,101,59,1,361,105,4,2,59,102,18579,18581,1,9653,59,1,9652,4,2,97,109,18590,18595,114,114,59,1,8648,108,5,252,1,59,18601,1,252,97,110,103,108,101,59,1,10663,4,15,65,66,68,97,99,100,101,102,108,110,111,112,114,115,122,18643,18648,18661,18667,18847,18851,18857,18904,18909,18915,18931,18937,18943,18949,18996,114,114,59,1,8661,97,114,4,2,59,118,18656,18658,1,10984,59,1,10985,97,115,104,59,1,8872,4,2,110,114,18673,18679,103,114,116,59,1,10652,4,7,101,107,110,112,114,115,116,18695,18704,18711,18720,18742,18754,18810,112,115,105,108,111,110,59,1,1013,97,112,112,97,59,1,1008,111,116,104,105,110,103,59,1,8709,4,3,104,105,114,18728,18732,18735,105,59,1,981,59,1,982,111,112,116,111,59,1,8733,4,2,59,104,18748,18750,1,8597,111,59,1,1009,4,2,105,117,18760,18766,103,109,97,59,1,962,4,2,98,112,18772,18791,115,101,116,110,101,113,4,2,59,113,18784,18787,3,8842,65024,59,3,10955,65024,115,101,116,110,101,113,4,2,59,113,18803,18806,3,8843,65024,59,3,10956,65024,4,2,104,114,18816,18822,101,116,97,59,1,977,105,97,110,103,108,101,4,2,108,114,18834,18840,101,102,116,59,1,8882,105,103,104,116,59,1,8883,121,59,1,1074,97,115,104,59,1,8866,4,3,101,108,114,18865,18884,18890,4,3,59,98,101,18873,18875,18880,1,8744,97,114,59,1,8891,113,59,1,8794,108,105,112,59,1,8942,4,2,98,116,18896,18901,97,114,59,1,124,59,1,124,114,59,3,55349,56627,116,114,105,59,1,8882,115,117,4,2,98,112,18923,18927,59,3,8834,8402,59,3,8835,8402,112,102,59,3,55349,56679,114,111,112,59,1,8733,116,114,105,59,1,8883,4,2,99,117,18955,18960,114,59,3,55349,56523,4,2,98,112,18966,18981,110,4,2,69,101,18973,18977,59,3,10955,65024,59,3,8842,65024,110,4,2,69,101,18988,18992,59,3,10956,65024,59,3,8843,65024,105,103,122,97,103,59,1,10650,4,7,99,101,102,111,112,114,115,19020,19026,19061,19066,19072,19075,19089,105,114,99,59,1,373,4,2,100,105,19032,19055,4,2,98,103,19038,19043,97,114,59,1,10847,101,4,2,59,113,19050,19052,1,8743,59,1,8793,101,114,112,59,1,8472,114,59,3,55349,56628,112,102,59,3,55349,56680,59,1,8472,4,2,59,101,19081,19083,1,8768,97,116,104,59,1,8768,99,114,59,3,55349,56524,4,14,99,100,102,104,105,108,109,110,111,114,115,117,118,119,19125,19146,19152,19157,19173,19176,19192,19197,19202,19236,19252,19269,19286,19291,4,3,97,105,117,19133,19137,19142,112,59,1,8898,114,99,59,1,9711,112,59,1,8899,116,114,105,59,1,9661,114,59,3,55349,56629,4,2,65,97,19163,19168,114,114,59,1,10234,114,114,59,1,10231,59,1,958,4,2,65,97,19182,19187,114,114,59,1,10232,114,114,59,1,10229,97,112,59,1,10236,105,115,59,1,8955,4,3,100,112,116,19210,19215,19230,111,116,59,1,10752,4,2,102,108,19221,19225,59,3,55349,56681,117,115,59,1,10753,105,109,101,59,1,10754,4,2,65,97,19242,19247,114,114,59,1,10233,114,114,59,1,10230,4,2,99,113,19258,19263,114,59,3,55349,56525,99,117,112,59,1,10758,4,2,112,116,19275,19281,108,117,115,59,1,10756,114,105,59,1,9651,101,101,59,1,8897,101,100,103,101,59,1,8896,4,8,97,99,101,102,105,111,115,117,19316,19335,19349,19357,19362,19367,19373,19379,99,4,2,117,121,19323,19332,116,101,5,253,1,59,19330,1,253,59,1,1103,4,2,105,121,19341,19346,114,99,59,1,375,59,1,1099,110,5,165,1,59,19355,1,165,114,59,3,55349,56630,99,121,59,1,1111,112,102,59,3,55349,56682,99,114,59,3,55349,56526,4,2,99,109,19385,19389,121,59,1,1102,108,5,255,1,59,19395,1,255,4,10,97,99,100,101,102,104,105,111,115,119,19419,19426,19441,19446,19462,19467,19472,19480,19486,19492,99,117,116,101,59,1,378,4,2,97,121,19432,19438,114,111,110,59,1,382,59,1,1079,111,116,59,1,380,4,2,101,116,19452,19458,116,114,102,59,1,8488,97,59,1,950,114,59,3,55349,56631,99,121,59,1,1078,103,114,97,114,114,59,1,8669,112,102,59,3,55349,56683,99,114,59,3,55349,56527,4,2,106,110,19498,19501,59,1,8205,106,59,1,8204]);
+// A line containing no characters, or a line containing only spaces (U+0020) or
+// tabs (U+0009), is called a blank line.
+// See <https://spec.commonmark.org/0.29/#blank-line>.
+var reBlankLine = /^[ \t]*(\n|$)/
+
+// Note that though blank lines play a special role in lists to determine
+// whether the list is tight or loose
+// (<https://spec.commonmark.org/0.29/#blank-lines>), it’s done by the list
+// tokenizer and this blank line tokenizer does not have to be responsible for
+// that.
+// Therefore, configs such as `blankLine.notInList` do not have to be set here.
+module.exports = blankLine
+
+function blankLine(eat, value, silent) {
+  var match
+  var subvalue = ''
+  var index = 0
+  var length = value.length
+
+  while (index < length) {
+    match = reBlankLine.exec(value.slice(index))
+
+    if (match == null) {
+      break
+    }
+
+    index += match[0].length
+    subvalue += match[0]
+  }
+
+  if (subvalue === '') {
+    return
+  }
+
+  /* istanbul ignore if - never used (yet) */
+  if (silent) {
+    return true
+  }
+
+  eat(subvalue)
+}
+
 
 /***/ }),
 /* 507 */,
@@ -26936,7 +28973,6 @@ module.exports = {
   position: true,
   gfm: true,
   commonmark: false,
-  footnotes: false,
   pedantic: false,
   blocks: __webpack_require__(991)
 }
@@ -27031,12 +29067,9 @@ function wrap(fn, callback) {
 
 module.exports = factory
 
-var keys = __webpack_require__(128)
-var difference = __webpack_require__(248)
-var intersection = __webpack_require__(259)
 var search = __webpack_require__(166)
-var visit = __webpack_require__(236)
-var convert = __webpack_require__(449)
+var visit = __webpack_require__(83)
+var convert = __webpack_require__(487)
 var toString = __webpack_require__(419)
 var normalize = __webpack_require__(864)
 var quotation = __webpack_require__(910)
@@ -27056,7 +29089,7 @@ function factory(patterns, lang) {
 
   // Several pattern types can be handled.
   // Handlers are stored in this map by type.
-  var handlers = {and: and, or: or, simple: simple}
+  var handlers = {or: or, basic: basic}
 
   // Internal mapping.
   var byId = []
@@ -27074,9 +29107,25 @@ function factory(patterns, lang) {
     var settings = options || {}
     var ignore = settings.ignore || []
     var noBinary = settings.noBinary
-    var phrases = difference(list, ignore)
-    var noNormalize = intersection(phrases, apostrophes)
-    var normalize = difference(phrases, noNormalize)
+    var noNormalize = []
+    var normalize = []
+    var length = list.length
+    var index = -1
+    var item
+
+    while (++index < length) {
+      item = list[index]
+
+      if (ignore.indexOf(item) !== -1) {
+        continue
+      }
+
+      if (apostrophes.indexOf(item) === -1) {
+        normalize.push(item)
+      } else {
+        noNormalize.push(item)
+      }
+    }
 
     return transformer
 
@@ -27096,7 +29145,7 @@ function factory(patterns, lang) {
           type = byId[key].type
 
           if (type === 'or' && noBinary) {
-            type = 'simple'
+            type = 'basic'
           }
 
           handlers[type](matches[key], byId[key], file)
@@ -27156,9 +29205,10 @@ function factory(patterns, lang) {
     }
   }
 
-  // Handle matches for a `simple` pattern.
-  // **Simple** patterns need no extra logic, every match is emitted as a warning.
-  function simple(matches, pattern, file) {
+  // Handle matches for a `basic` pattern.
+  // **Basic** patterns need no extra logic, every match is emitted as a
+  // warning.
+  function basic(matches, pattern, file) {
     var note = pattern.note
     var id = pattern.id
     var length = matches.length
@@ -27179,54 +29229,6 @@ function factory(patterns, lang) {
         note,
         pattern.condition
       )
-    }
-  }
-
-  // Handle matches for an `and` pattern.
-  // **And** patterns emit a warning when every category is present.
-  //
-  // For example, when `master` and `slave` occur in a context together, they
-  // emit a warning.
-  function and(matches, pattern, file) {
-    var categories = pattern.categories.concat()
-    var note = pattern.note
-    var id = pattern.id
-    var length = matches.length
-    var index = -1
-    var phrases = []
-    var suggestions = []
-    var match
-    var position
-    var siblings
-    var first
-
-    while (++index < length) {
-      match = matches[index]
-      siblings = match.parent.children
-      position = categories.indexOf(match.type)
-
-      if (position !== -1) {
-        categories.splice(position, 1)
-        phrases.push(toString(siblings.slice(match.start, match.end + 1)))
-        suggestions.push(byValue(pattern.considerate, match.type))
-
-        if (!first) {
-          first = match.nodes[0]
-        }
-
-        if (categories.length === 0) {
-          warn(
-            file,
-            id,
-            phrases,
-            suggestions,
-            first,
-            note,
-            pattern.condition,
-            ' / '
-          )
-        }
-      }
     }
   }
 
@@ -27300,9 +29302,7 @@ function factory(patterns, lang) {
     var message
 
     if (expected) {
-      if (!('join' in expected)) {
-        expected = keys(expected)
-      }
+      expected = Object.keys(expected)
 
       if (isCapitalized(actual)) {
         expected = capitalize(expected)
@@ -27322,20 +29322,6 @@ function factory(patterns, lang) {
       message.note = note
     }
   }
-}
-
-// Get the first key at which `value` lives in `context`.
-function byValue(object, value) {
-  var key
-
-  for (key in object) {
-    if (object[key] === value) {
-      return key
-    }
-  }
-
-  /* istanbul ignore next */
-  return null
 }
 
 // Create a human readable warning message for `violation` and suggest
@@ -27365,7 +29351,7 @@ function join(value, joiner) {
 // Supports a string, or a list of strings.
 // Defers to the standard library for what defines a “upper case” letter.
 function isCapitalized(value) {
-  var char = (value.charAt ? value : value[0]).charAt(0)
+  var char = value.charAt(0)
   return char.toUpperCase() === char
 }
 
@@ -28153,28 +30139,22 @@ function whitespace(character) {
 "use strict";
 
 
-var visitChildren = __webpack_require__(997)
+var stringifyEntities = __webpack_require__(279)
 
-module.exports = visitChildren(makeInitialWhiteSpaceSiblings)
+module.exports = text
 
-// Move white space starting a sentence up, so they are the siblings of
-// sentences.
-function makeInitialWhiteSpaceSiblings(child, index, parent) {
-  var children = child.children
-  var next
+var expressionCharacterReferenceOptions = {
+  useNamedReferences: true,
+  // Note: we don’t encode `>` or `}`, as we don’t crash on parsing them
+  // either.
+  subset: ['<', '{']
+}
 
-  if (
-    children &&
-    children.length !== 0 &&
-    children[0].type === 'WhiteSpaceNode'
-  ) {
-    parent.children.splice(index, 0, children.shift())
-    next = children[0]
-
-    if (next && next.position && child.position) {
-      child.position.start = next.position.start
-    }
-  }
+function text(node, parent) {
+  return stringifyEntities(
+    this.escape(node.value, node, parent),
+    expressionCharacterReferenceOptions
+  )
 }
 
 
@@ -28194,7 +30174,6 @@ var getIndent = __webpack_require__(739)
 
 module.exports = indentation
 
-var tab = '\t'
 var lineFeed = '\n'
 var space = ' '
 var exclamationMark = '!'
@@ -28209,7 +30188,6 @@ function indentation(value, maximum) {
   var index
   var indentation
   var stops
-  var padding
 
   values.unshift(repeat(space, maximum) + exclamationMark)
 
@@ -28244,18 +30222,7 @@ function indentation(value, maximum) {
         index--
       }
 
-      if (
-        trim(values[position]).length !== 0 &&
-        minIndent &&
-        index !== minIndent
-      ) {
-        padding = tab
-      } else {
-        padding = ''
-      }
-
-      values[position] =
-        padding + values[position].slice(index in stops ? stops[index] + 1 : 0)
+      values[position] = values[position].slice(stops[index] + 1)
     }
   }
 
@@ -28593,7 +30560,6 @@ module.exports = copy
 
 var fromParse5 = __webpack_require__(255)
 var Parser5 = __webpack_require__(60)
-var xtend = __webpack_require__(940)
 var errors = __webpack_require__(678)
 
 var base = 'https://html.spec.whatwg.org/multipage/parsing.html#parse-error-'
@@ -28603,7 +30569,7 @@ var fatalities = {2: true, 1: false, 0: null}
 module.exports = parse
 
 function parse(options) {
-  var settings = xtend(options, this.data('settings'))
+  var settings = Object.assign({}, options, this.data('settings'))
   var position = settings.position
 
   position = typeof position === 'boolean' ? position : true
@@ -28665,10 +30631,7 @@ function parse(options) {
       }
 
       function encodedChar() {
-        var char = doc
-          .charCodeAt(err.startOffset)
-          .toString(16)
-          .toUpperCase()
+        var char = doc.charCodeAt(err.startOffset).toString(16).toUpperCase()
 
         return '0x' + char
       }
@@ -29219,26 +31182,26 @@ function factory(ctx, key) {
 
   // De-escape a string using the expression at `key` in `ctx`.
   function unescape(value) {
-    var prev = 0
+    var previous = 0
     var index = value.indexOf(backslash)
     var escape = ctx[key]
     var queue = []
     var character
 
     while (index !== -1) {
-      queue.push(value.slice(prev, index))
-      prev = index + 1
-      character = value.charAt(prev)
+      queue.push(value.slice(previous, index))
+      previous = index + 1
+      character = value.charAt(previous)
 
       // If the following character is not a valid escape, add the slash.
       if (!character || escape.indexOf(character) === -1) {
         queue.push(backslash)
       }
 
-      index = value.indexOf(backslash, prev + 1)
+      index = value.indexOf(backslash, previous + 1)
     }
 
-    queue.push(value.slice(prev))
+    queue.push(value.slice(previous))
 
     return queue.join('')
   }
@@ -29453,7 +31416,89 @@ module.exports = require("net");
 /* 632 */,
 /* 633 */,
 /* 634 */,
-/* 635 */,
+/* 635 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = factory
+
+function factory(file) {
+  var contents = indices(String(file))
+  var toPoint = offsetToPointFactory(contents)
+
+  return {
+    toPoint: toPoint,
+    toPosition: toPoint,
+    toOffset: pointToOffsetFactory(contents)
+  }
+}
+
+// Factory to get the line and column-based `point` for `offset` in the bound
+// indices.
+function offsetToPointFactory(indices) {
+  return offsetToPoint
+
+  // Get the line and column-based `point` for `offset` in the bound indices.
+  function offsetToPoint(offset) {
+    var index = -1
+    var length = indices.length
+
+    if (offset < 0) {
+      return {}
+    }
+
+    while (++index < length) {
+      if (indices[index] > offset) {
+        return {
+          line: index + 1,
+          column: offset - (indices[index - 1] || 0) + 1,
+          offset: offset
+        }
+      }
+    }
+
+    return {}
+  }
+}
+
+// Factory to get the `offset` for a line and column-based `point` in the
+// bound indices.
+function pointToOffsetFactory(indices) {
+  return pointToOffset
+
+  // Get the `offset` for a line and column-based `point` in the bound
+  // indices.
+  function pointToOffset(point) {
+    var line = point && point.line
+    var column = point && point.column
+
+    if (!isNaN(line) && !isNaN(column) && line - 1 in indices) {
+      return (indices[line - 2] || 0) + column - 1 || 0
+    }
+
+    return -1
+  }
+}
+
+// Get indices of line-breaks in `value`.
+function indices(value) {
+  var result = []
+  var index = value.indexOf('\n')
+
+  while (index !== -1) {
+    result.push(index + 1)
+    index = value.indexOf('\n', index + 1)
+  }
+
+  result.push(value.length + 1)
+
+  return result
+}
+
+
+/***/ }),
 /* 636 */,
 /* 637 */,
 /* 638 */
@@ -29551,11 +31596,12 @@ function mergePrefixExceptions(child, index, parent) {
 "use strict";
 
 
-var extend = __webpack_require__(374)
 var bail = __webpack_require__(175)
-var vfile = __webpack_require__(51)
-var trough = __webpack_require__(132)
+var buffer = __webpack_require__(812)
+var extend = __webpack_require__(374)
 var plain = __webpack_require__(343)
+var trough = __webpack_require__(132)
+var vfile = __webpack_require__(51)
 
 // Expose a frozen processor.
 module.exports = unified().freeze()
@@ -29588,7 +31634,16 @@ function pipelineRun(p, ctx, next) {
 }
 
 function pipelineStringify(p, ctx) {
-  ctx.file.contents = p.stringify(ctx.tree, ctx.file)
+  var result = p.stringify(ctx.tree, ctx.file)
+  var file = ctx.file
+
+  if (result === undefined || result === null) {
+    // Empty.
+  } else if (typeof result === 'string' || buffer(result)) {
+    file.contents = result
+  } else {
+    file.result = result
+  }
 }
 
 // Function to create the first processor.
@@ -30406,7 +32461,6 @@ if (process.platform === 'linux') {
 "use strict";
 
 
-var xtend = __webpack_require__(940)
 var matters = __webpack_require__(167)
 var parse = __webpack_require__(726)
 var compile = __webpack_require__(700)
@@ -30438,12 +32492,12 @@ function attachParser(parser, matters) {
   }
 
   proto.blockMethods = names.concat(proto.blockMethods)
-  proto.blockTokenizers = xtend(tokenizers, proto.blockTokenizers)
+  proto.blockTokenizers = Object.assign({}, tokenizers, proto.blockTokenizers)
 }
 
 function attachCompiler(compiler, matters) {
   var proto = compiler.prototype
-  proto.visitors = xtend(wrap(compile, matters), proto.visitors)
+  proto.visitors = Object.assign({}, wrap(compile, matters), proto.visitors)
 }
 
 function wrap(func, matters) {
@@ -30850,7 +32904,20 @@ exports.fromPromise = function (fn) {
 
 
 /***/ }),
-/* 677 */,
+/* 677 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = serializeCharCode
+
+function serializeCharCode(code) {
+  return 'U+' + code.toString(16).toUpperCase().padStart(4, '0')
+}
+
+
+/***/ }),
 /* 678 */
 /***/ (function(module) {
 
@@ -30981,7 +33048,7 @@ function indices(value) {
 
 var merge = __webpack_require__(986)
 var xlink = __webpack_require__(220)
-var xml = __webpack_require__(144)
+var xml = __webpack_require__(736)
 var xmlns = __webpack_require__(534)
 var aria = __webpack_require__(857)
 var html = __webpack_require__(285)
@@ -31186,7 +33253,6 @@ function create(matter) {
 
 var control = __webpack_require__(976)
 var marker = __webpack_require__(10)
-var xtend = __webpack_require__(940)
 
 module.exports = messageControl
 
@@ -31196,7 +33262,7 @@ var test = [
 ]
 
 function messageControl(options) {
-  return control(xtend({marker: marker, test: test}, options))
+  return control(Object.assign({marker: marker, test: test}, options))
 }
 
 
@@ -31416,22 +33482,25 @@ function Schema(property, normal, space) {
 
 module.exports = locate
 
-var protocols = ['https://', 'http://', 'mailto:']
+var values = ['www.', 'http://', 'https://']
 
 function locate(value, fromIndex) {
-  var length = protocols.length
-  var index = -1
   var min = -1
+  var index
+  var length
   var position
 
   if (!this.options.gfm) {
-    return -1
+    return min
   }
 
-  while (++index < length) {
-    position = value.indexOf(protocols[index], fromIndex)
+  length = values.length
+  index = -1
 
-    if (position !== -1 && (position < min || min === -1)) {
+  while (++index < length) {
+    position = value.indexOf(values[index], fromIndex)
+
+    if (position !== -1 && (min === -1 || position < min)) {
       min = position
     }
   }
@@ -31661,7 +33730,30 @@ function parse() {
 
 /***/ }),
 /* 735 */,
-/* 736 */,
+/* 736 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var create = __webpack_require__(42)
+
+module.exports = create({
+  space: 'xml',
+  transform: xmlTransform,
+  properties: {
+    xmlLang: null,
+    xmlBase: null,
+    xmlSpace: null
+  }
+})
+
+function xmlTransform(_, prop) {
+  return 'xml:' + prop.slice(3).toLowerCase()
+}
+
+
+/***/ }),
 /* 737 */,
 /* 738 */,
 /* 739 */
@@ -31685,6 +33777,7 @@ function indentation(value) {
   var character = value.charAt(index)
   var stops = {}
   var size
+  var lastIndent = 0
 
   while (character === tab || character === space) {
     size = character === tab ? tabSize : spaceSize
@@ -31695,7 +33788,10 @@ function indentation(value) {
       indent = Math.floor(indent / size) * size
     }
 
-    stops[indent] = index
+    while (lastIndent < indent) {
+      stops[++lastIndent] = index
+    }
+
     character = value.charAt(++index)
   }
 
@@ -31945,7 +34041,29 @@ exports.request = request;
 
 /***/ }),
 /* 754 */,
-/* 755 */,
+/* 755 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var indent = __webpack_require__(973)
+
+module.exports = mdxExpression
+
+var leftCurlyBrace = '{'
+var rightCurlyBrace = '}'
+
+function mdxExpression(node) {
+  var value = node.value || ''
+  var block = node.type === 'mdxBlockExpression'
+  var around = block ? '\n' : ''
+  var content = block ? indent(value) : value
+  return leftCurlyBrace + around + content + around + rightCurlyBrace
+}
+
+
+/***/ }),
 /* 756 */,
 /* 757 */,
 /* 758 */,
@@ -31953,7 +34071,7 @@ exports.request = request;
 /* 760 */
 /***/ (function(module) {
 
-module.exports = [{"id":"learning-disabled","type":"simple","categories":["a"],"considerate":{"person with learning disabilities":"a"},"inconsiderate":{"learning disabled":"a"},"note":"Refer to the person, rather than the disability, first."},{"id":"invalid","type":"simple","categories":["a"],"considerate":{"turned off":"a","has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"disabled":"a","invalid":"a"},"note":"Refer to the person, rather than the disability, first."},{"id":"birth-defect","type":"simple","categories":["a"],"considerate":{"has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"birth defect":"a"},"note":"Assumes/implies that a person with a disability is deficient or inferior to others. When possible, specify the functional ability or its restriction. (source: https://ncdj.org/style-guide/)"},{"id":"suffers-from-disabilities","type":"simple","categories":["a"],"considerate":{"has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"suffers from disabilities":"a","suffering from disabilities":"a","suffering from a disability":"a","afflicted with disabilities":"a","afflicted with a disability":"a"},"note":"Assumes that a person with a disability has a reduced quality of life. (source: https://ncdj.org/style-guide/)"},{"id":"intellectually-disabled-people","type":"simple","categories":["a"],"considerate":{"people with intellectual disabilities":"a"},"inconsiderate":{"intellectually disabled people":"a"},"note":"Refer to the person, rather than the disability, first. (source: https://ncdj.org/style-guide/)"},{"id":"intellectually-disabled","type":"simple","categories":["a"],"considerate":{"person with an intellectual disability":"a"},"inconsiderate":{"intellectually disabled":"a","has intellectual issues":"a","suffers from intellectual disabilities":"a","suffering from intellectual disabilities":"a","suffering from an intellectual disability":"a","afflicted with intellectual disabilities":"a","afflicted with a intellectual disability":"a"},"note":"Assumes that a person with an intellectual disability has a reduced quality of life. (source: https://ncdj.org/style-guide/)"},{"id":"nuts","type":"simple","categories":["a"],"considerate":{"rude":"a","malicious":"a","mean":"a","disgusting":"a","vile":"a","person with symptoms of mental illness":"a","person with mental illness":"a","person with symptoms of a mental disorder":"a","person with a mental disorder":"a"},"inconsiderate":{"batshit":"a","psycho":"a","crazy":"a","delirious":"a","insane":"a","insanity":"a","loony":"a","lunacy":"a","lunatic":"a","mentally ill":"a","psychopathology":"a","mental defective":"a","moron":"a","moronic":"a","nuts":"a","mental case":"a","mental":"a"},"note":"Describe the behavior or illness without derogatory words. (source: https://ncdj.org/style-guide/)"},{"id":"sane","type":"simple","categories":["a"],"considerate":{"correct":"a","adequate":"a","sufficient":"a","consistent":"a","valid":"a","coherent":"a","sensible":"a","reasonable":"a"},"inconsiderate":{"sane":"a"},"note":"When describing a mathematical or programmatic value, using the word “sane” needlessly invokes the topic of mental health.  Consider using a domain-specific or neutral term instead."},{"id":"sanity-check","type":"simple","categories":["a"],"considerate":{"check":"a","assertion":"a","validation":"a","smoke test":"a"},"inconsiderate":{"sanity check":"a"},"note":"When describing a mathematical or programmatic value, using the phrase “sanity check” needlessly invokes the topic of mental health.  Consider using simply “check”, or a domain-specific or neutral term, instead."},{"id":"bipolar","type":"simple","categories":["a"],"considerate":{"fluctuating":"a","person with bipolar disorder":"a"},"inconsiderate":{"bipolar":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"schizo","type":"simple","categories":["a"],"considerate":{"person with schizophrenia":"a"},"inconsiderate":{"schizophrenic":"a","schizo":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"manic","type":"simple","categories":["a"],"considerate":{"person with schizophrenia":"a"},"inconsiderate":{"suffers from schizophrenia":"a","suffering from schizophrenia":"a","afflicted with schizophrenia":"a","manic":"a"},"note":"Assumes a person with schizophrenia experiences a reduced quality of life. (source: https://ncdj.org/style-guide/)"},{"id":"handicapped-parking","type":"simple","categories":["a"],"considerate":{"accessible parking":"a"},"inconsiderate":{"handicapped parking":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"handicapped","type":"simple","categories":["a"],"considerate":{"person with a handicap":"a","accessible":"a"},"inconsiderate":{"handicapped":"a"},"note":"Refer to the person, rather than the disability, first. (source: https://ncdj.org/style-guide/)"},{"id":"amputee","type":"simple","categories":["a"],"considerate":{"person with an amputation":"a"},"inconsiderate":{"amputee":"a"},"note":"Refer to the person, rather than the condition, first. (source: https://ncdj.org/style-guide/)"},{"id":"gimp","type":"simple","categories":["a"],"considerate":{"person with a limp":"a"},"inconsiderate":{"cripple":"a","crippled":"a","gimp":"a"},"note":"Refer to the specific disability."},{"id":"mongoloid","type":"simple","categories":["a"],"considerate":{"person with Down Syndrome":"a"},"inconsiderate":{"mongoloid":"a"}},{"id":"stroke-victim","type":"simple","categories":["a"],"considerate":{"individual who has had a stroke":"a"},"inconsiderate":{"stroke victim":"a","suffering from a stroke":"a","victim of a stroke":"a"},"note":"Refer to the person, rather than the condition, first."},{"id":"multiple-sclerosis-victim","type":"simple","categories":["a"],"considerate":{"person who has multiple sclerosis":"a"},"inconsiderate":{"suffers from multiple sclerosis":"a","suffering from multiple sclerosis":"a","victim of multiple sclerosis":"a","multiple sclerosis victim":"a","afflicted with multiple sclerosis":"a"}},{"id":"suffers-from-md","type":"simple","categories":["a"],"considerate":{"person who has muscular dystrophy":"a"},"inconsiderate":{"suffers from muscular dystrophy":"a","afflicted with muscular dystrophy":"a","suffers from MD":"a","afflicted with MD":"a"},"note":"Refer to a person's condition as a state, not as an affliction. (source: https://ncdj.org/style-guide)"},{"id":"family-burden","type":"simple","categories":["a"],"considerate":{"with family support needs":"a"},"inconsiderate":{"family burden":"a"}},{"id":"asylum","type":"simple","categories":["a"],"considerate":{"psychiatric hospital":"a","mental health hospital":"a"},"inconsiderate":{"asylum":"a"}},{"id":"bedlam","type":"simple","categories":["a"],"considerate":{"chaos":"a","hectic":"a","pandemonium":"a"},"inconsiderate":{"bedlam":"a","madhouse":"a","loony bin":"a"}},{"id":"downs-syndrome","type":"simple","categories":["a"],"considerate":{"Down Syndrome":"a"},"inconsiderate":{"downs syndrome":"a"},"note":"Source: https://media.specialolympics.org/soi/files/press-kit/2014_FactSheet_Final.pdf"},{"id":"retard","type":"simple","categories":["a"],"considerate":{"silly":"a","dullard":"a","person with Down Syndrome":"a","person with developmental disabilities":"a","delay":"a","hold back":"a"},"inconsiderate":{"retard":"a","retarded":"a","short bus":"a"}},{"id":"retards","type":"simple","categories":["a"],"considerate":{"sillies":"a","dullards":"a","people with developmental disabilities":"a","people with Down’s Syndrome":"a","delays":"a","holds back":"a"},"inconsiderate":{"retards":"a"}},{"id":"psychotic","type":"simple","categories":["a"],"considerate":{"person with a psychotic condition":"a","person with psychosis":"a"},"inconsiderate":{"psychotic":"a","suffers from psychosis":"a","suffering from psychosis":"a","afflicted with psychosis":"a","victim of psychosis":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition."},{"id":"lame","type":"simple","categories":["a"],"considerate":{"boring":"a","dull":"a"},"inconsiderate":{"lame":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"aids-victim","type":"simple","categories":["a"],"considerate":{"person with AIDS":"a"},"inconsiderate":{"suffering from aids":"a","suffer from aids":"a","suffers from aids":"a","afflicted with aids":"a","victim of aids":"a","aids victim":"a"}},{"id":"wheelchair-bound","type":"simple","categories":["a"],"considerate":{"uses a wheelchair":"a"},"inconsiderate":{"confined to a wheelchair":"a","bound to a wheelchair":"a","restricted to a wheelchair":"a","wheelchair bound":"a"}},{"id":"special-olympians","type":"simple","categories":["a"],"considerate":{"athletes":"a","Special Olympics athletes":"a"},"inconsiderate":{"special olympians":"a","special olympic athletes":"a"},"note":"When possible, use the exact discipline of sport. (source: https://media.specialolympics.org/soi/files/press-kit/2014_FactSheet_Final.pdf)"},{"id":"ablebodied","type":"simple","categories":["a"],"considerate":{"non-disabled":"a"},"inconsiderate":{"ablebodied":"a"},"note":"Can imply that people with disabilities lack the ability to use their bodies well. Sometimes `typical` can be used. (source: https://ncdj.org/style-guide/)"},{"id":"addict","type":"simple","categories":["a"],"considerate":{"person with a drug addiction":"a","person recovering from a drug addiction":"a"},"inconsiderate":{"addict":"a","junkie":"a"},"note":"Addiction is a neurobiological disease. (source: https://ncdj.org/style-guide/)"},{"id":"addicts","type":"simple","categories":["a"],"considerate":{"people with a drug addiction":"a","people recovering from a drug addiction":"a"},"inconsiderate":{"addicts":"a","junkies":"a"},"note":"Addiction is a neurobiological disease. (source: https://ncdj.org/style-guide/)"},{"id":"alcoholic","type":"simple","categories":["a"],"considerate":{"someone with an alcohol problem":"a"},"inconsiderate":{"alcoholic":"a","alcohol abuser":"a"},"note":"Alcoholism is a neurobiological disease. (source: https://ncdj.org/style-guide/)"},{"id":"deafmute","type":"simple","categories":["a"],"considerate":{"deaf":"a"},"inconsiderate":{"deaf and dumb":"a","deafmute":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"senile","type":"simple","categories":["a"],"considerate":{"person with dementia":"a"},"inconsiderate":{"demented":"a","senile":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"depressed","type":"simple","categories":["a"],"considerate":{"sad":"a","blue":"a","bummed out":"a","person with seasonal affective disorder":"a","person with psychotic depression":"a","person with postpartum depression":"a"},"inconsiderate":{"depressed":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"dwarf","type":"simple","categories":["a"],"considerate":{"person with dwarfism":"a","little person":"a","little people":"a","LP":"a","person of short stature":"a"},"inconsiderate":{"vertically challenged":"a","midget":"a","small person":"a","dwarf":"a"},"note":"Source: https://ncdj.org/style-guide/,https://www.lpaonline.org/faq-#Midget"},{"id":"dyslexic","type":"simple","categories":["a"],"considerate":{"person with dyslexia":"a"},"inconsiderate":{"dyslexic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"epileptic","type":"simple","categories":["a"],"considerate":{"person with epilepsy":"a"},"inconsiderate":{"epileptic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"hearing-impaired","type":"simple","categories":["a"],"considerate":{"hard of hearing":"a","partially deaf":"a","partial hearing loss":"a","deaf":"a"},"inconsiderate":{"hearing impaired":"a","hearing impairment":"a"},"note":"When possible, ask the person what they prefer. (source: https://ncdj.org/style-guide/)"},{"id":"victim-of-polio","type":"simple","categories":["a"],"considerate":{"polio":"a","person who had polio":"a"},"inconsiderate":{"infantile paralysis":"a","suffers from polio":"a","suffering from polio":"a","suffering from a polio":"a","afflicted with polio":"a","afflicted with a polio":"a","victim of polio":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"victim-of-an-injury","type":"simple","categories":["a"],"considerate":{"sustain an injury":"a","receive an injury":"a"},"inconsiderate":{"suffer from an injury":"a","suffers from an injury":"a","suffering from an injury":"a","afflicted with an injury":"a","victim of an injury":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"victim-of-injuries","type":"simple","categories":["a"],"considerate":{"sustain injuries":"a","receive injuries":"a"},"inconsiderate":{"suffer from injuries":"a","suffers from injuries":"a","suffering from injuries":"a","afflicted with injuries":"a","victim of injuries":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"paraplegic","type":"simple","categories":["a"],"considerate":{"person with paraplegia":"a"},"inconsiderate":{"paraplegic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"quadriplegic","type":"simple","categories":["a"],"considerate":{"person with quadriplegia":"a"},"inconsiderate":{"quadriplegic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"spaz","type":"simple","categories":["a"],"considerate":{"person with cerebral palsy":"a","twitch":"a","flinch":"a","hectic":"a"},"inconsiderate":{"spaz":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"spastic","type":"simple","categories":["a"],"considerate":{"person with cerebral palsy":"a","twitch":"a","flinch":"a"},"inconsiderate":{"spastic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"stammering","type":"simple","categories":["a"],"considerate":{"stuttering":"a","disfluency of speech":"a"},"inconsiderate":{"stammering":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"stutterer","type":"simple","categories":["a"],"considerate":{"person who stutters":"a"},"inconsiderate":{"stutterer":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"tourettes-syndrome","type":"simple","categories":["a"],"considerate":{"Tourette syndrome":"a"},"inconsiderate":{"tourettes syndrome":"a","tourettes disorder":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"rehab-center","type":"simple","categories":["a"],"considerate":{"treatment center":"a"},"inconsiderate":{"rehab center":"a","detox center":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"rehab","type":"simple","categories":["a"],"considerate":{"treatment":"a"},"inconsiderate":{"rehab":"a","detox":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"sociopath","type":"simple","categories":["a"],"considerate":{"person with a personality disorder":"a","person with psychopathic personality":"a"},"inconsiderate":{"sociopath":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"sociopaths","type":"simple","categories":["a"],"considerate":{"people with psychopathic personalities":"a","people with a personality disorder":"a"},"inconsiderate":{"sociopaths":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"dumb","type":"simple","categories":["a"],"considerate":{"foolish":"a","ludicrous":"a","speechless":"a","silent":"a"},"inconsiderate":{"dumb":"a"},"note":"Dumb here is used in 2 different contexts , the inability to talk or as a curse word. (source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html)"},{"id":"wacko","type":"simple","categories":["a"],"considerate":{"foolish":"a","ludicrous":"a","unintelligent":"a"},"inconsiderate":{"simpleton":"a","stupid":"a","wacko":"a","whacko":"a","low iq":"a"},"note":"Source: http://www.mmonjejr.com/2014/02/deconstructing-stupid.html"},{"id":"panic-attack","type":"simple","categories":["a"],"considerate":{"fit of terror":"a","scare":"a"},"inconsiderate":{"panic attack":"a"}},{"id":"bony","type":"simple","categories":["a"],"considerate":{"thin":"a","slim":"a"},"inconsiderate":{"anorexic":"a","bony":"a"}},{"id":"ocd","type":"simple","categories":["a"],"considerate":{"has an anxiety disorder":"a","obsessive":"a","pedantic":"a","niggly":"a","picky":"a"},"inconsiderate":{"neurotic":"a","ocd":"a","o.c.d":"a","o.c.d.":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://english.stackexchange.com/questions/247550/)"},{"id":"insomnia","type":"simple","categories":["a"],"considerate":{"restlessness":"a","sleeplessness":"a"},"inconsiderate":{"insomnia":"a"}},{"id":"insomniac","type":"simple","categories":["a"],"considerate":{"person who has insomnia":"a"},"inconsiderate":{"insomniac":"a"}},{"id":"insomniacs","type":"simple","categories":["a"],"considerate":{"people who have insomnia":"a"},"inconsiderate":{"insomniacs":"a"}},{"id":"barren","type":"simple","categories":["a"],"considerate":{"empty":"a","sterile":"a","infertile":"a"},"inconsiderate":{"barren":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"deaf-to","type":"simple","categories":["a"],"considerate":{"careless":"a","heartless":"a","indifferent":"a","insensitive":"a"},"inconsiderate":{"blind to":"a","blind eye to":"a","blinded by":"a","deaf to":"a","deaf ear to":"a","deafened by":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"cretin","type":"simple","categories":["a"],"considerate":{"creep":"a","fool":"a"},"inconsiderate":{"cretin":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"daft","type":"simple","categories":["a"],"considerate":{"absurd":"a","foolish":"a"},"inconsiderate":{"daft":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"idiot","type":"simple","categories":["a"],"considerate":{"foolish":"a","ludicrous":"a","silly":"a"},"inconsiderate":{"feebleminded":"a","feeble minded":"a","idiot":"a","imbecile":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"harelipped","type":"simple","categories":["a"],"considerate":{"person with a cleft-lip and palate":"a"},"inconsiderate":{"harelipped":"a","cleftlipped":"a"},"note":"Sometimes it's cleft lip or palate, not both. Specify when possible. (source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html)"},{"id":"harelip","type":"simple","categories":["a"],"considerate":{"cleft-lip and palate":"a"},"inconsiderate":{"harelip":"a","hare lip":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"maniac","type":"simple","categories":["a"],"considerate":{"fanatic":"a","zealot":"a","enthusiast":"a"},"inconsiderate":{"maniac":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"buckteeth","type":"simple","categories":["a"],"considerate":{"person with prominent teeth":"a","prominent teeth":"a"},"inconsiderate":{"bucktoothed":"a","buckteeth":"a"}},{"id":"special","type":"simple","categories":["a"],"considerate":{"has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"challenged":"a","diffability":"a","differently abled":"a","handicapable":"a","special":"a","special needs":"a","specially abled":"a"},"note":"Euphemisms for disabilities can be infantilizing. (source: http://cdrnys.org/blog/disability-dialogue/the-disability-dialogue-4-disability-euphemisms-that-need-to-bite-the-dust/,https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html)"},{"id":"libtard","type":"simple","categories":["a"],"considerate":{"disagreeable":"a","uneducated":"a","ignorant":"a","naive":"a","inconsiderate":"a"},"inconsiderate":{"fucktard":"a","libtard":"a","contard":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"add","type":"simple","categories":["a"],"considerate":{"disorganized":"a","distracted":"a","energetic":"a","hyperactive":"a","impetuous":"a","impulsive":"a","inattentive":"a","restless":"a","unfocused":"a"},"inconsiderate":{"ADD":"a","adhd":"a","a.d.d.":"a","a.d.h.d.":"a"}},{"id":"obvious","type":"simple","categories":["a"],"inconsiderate":{"obvious":"a","obviously":"a"},"note":"Not everything is as obvious as you might think. And if it isn’t obvious to the reader, it can hurt. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"just","type":"simple","categories":["a"],"inconsiderate":{"just":"a"},"note":"Not everything is as easy as you might think. And if it isn’t easy for the reader, it can hurt. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"basically","type":"simple","categories":["a"],"inconsiderate":{"basically":"a"},"note":"It’s probably not that basic. If you’re going to explain a confusing previous sentence with a clearer next sentence, why not drop the former and only use the latter? (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"simple","type":"simple","categories":["a"],"inconsiderate":{"simple":"a","simply":"a"},"note":"It’s probably not that simple. Even if it is, you probably don’t need to specifically say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"easy","type":"simple","categories":["a"],"inconsiderate":{"easy":"a","easily":"a"},"note":"It’s probably not that easy. Even if it is, you probably don’t need to specifically say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"of-course","type":"simple","categories":["a"],"inconsiderate":{"of course":"a"},"note":"If it’s self-evident then maybe you don’t need to describe it. If it isn’t, don’t say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"clearly","type":"simple","categories":["a"],"inconsiderate":{"clearly":"a"},"note":"If it’s self-evident then maybe you don’t need to describe it. If it isn’t, don’t say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"everyone-knows","type":"simple","categories":["a"],"inconsiderate":{"everyone knows":"a"},"note":"If it’s self-evident then maybe you don’t need to describe it. If it isn’t, don’t say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"her-him","type":"or","categories":["female","male"],"considerate":{"their":"a","theirs":"a","them":"a"},"inconsiderate":{"her":"female","hers":"female","him":"male","his":"male"},"condition":"when referring to a person"},{"id":"he-she","type":"or","apostrophe":true,"categories":["female","male"],"considerate":{"they":"a","it":"a"},"inconsiderate":{"she":"female","he":"male","she'd":"female","he'd":"male","she'll":"female","he'll":"male","she's":"female","he's":"male"}},{"id":"herself-himself","type":"or","categories":["female","male"],"considerate":{"themselves":"a","theirself":"a","self":"a"},"inconsiderate":{"herself":"female","himself":"male"}},{"id":"boy-girl","type":"or","categories":["female","male"],"considerate":{"kid":"a","child":"a","youth":"a"},"inconsiderate":{"girl":"female","boy":"male"},"condition":"when referring to a person"},{"id":"gals-men","type":"or","categories":["female","male"],"considerate":{"people":"a","persons":"a","folks":"a"},"inconsiderate":{"women":"female","girls":"female","gals":"female","ladies":"female","men":"male","guys":"male","dudes":"male","gents":"male","gentlemen":"male"}},{"id":"gal-guy","type":"or","categories":["female","male"],"considerate":{"person":"a","friend":"a","pal":"a","folk":"a","individual":"a"},"inconsiderate":{"woman":"female","gal":"female","lady":"female","babe":"female","bimbo":"female","chick":"female","guy":"male","lad":"male","fellow":"male","dude":"male","bro":"male","gentleman":"male"}},{"id":"fatherland-motherland","type":"or","categories":["female","male"],"considerate":{"native land":"a","homeland":"a"},"inconsiderate":{"motherland":"female","fatherland":"male"}},{"id":"father-tongue-mother-tongue","type":"or","categories":["female","male"],"considerate":{"native tongue":"a","native language":"a"},"inconsiderate":{"mother tongue":"female","father tongue":"male"}},{"id":"freshmen-freshwomen","type":"or","categories":["female","male"],"considerate":{"first-year students":"a","freshers":"a"},"inconsiderate":{"freshwomen":"female","freshmen":"male"}},{"id":"garbageman-garbagewoman","type":"or","categories":["female","male"],"considerate":{"garbage collector":"a","waste collector":"a","trash collector":"a"},"inconsiderate":{"garbagewoman":"female","garbageman":"male"}},{"id":"garbagemen-garbagewomen","type":"or","categories":["female","male"],"considerate":{"garbage collectors":"a","waste collectors":"a","trash collectors":"a"},"inconsiderate":{"garbagewomen":"female","garbagemen":"male"}},{"id":"chairman-chairwoman","type":"or","categories":["female","male"],"considerate":{"chair":"a","head":"a","chairperson":"a","coordinator":"a","committee head":"a","moderator":"a","presiding officer":"a"},"inconsiderate":{"chairwoman":"female","chairman":"male"}},{"id":"committee-man-committee-woman","type":"or","categories":["female","male"],"considerate":{"committee member":"a"},"inconsiderate":{"committee woman":"female","committee man":"male"}},{"id":"cowboy-cowgirl","type":"or","categories":["female","male"],"considerate":{"cowhand":"a"},"inconsiderate":{"cowgirl":"female","cowboy":"male"}},{"id":"cowboys-cowgirls","type":"or","categories":["female","male"],"considerate":{"cowhands":"a"},"inconsiderate":{"cowgirls":"female","cowboys":"male"}},{"id":"cattleman-cattlewoman","type":"or","categories":["female","male"],"considerate":{"cattle rancher":"a"},"inconsiderate":{"cattlewoman":"female","cattleman":"male"}},{"id":"cattlemen-cattlewomen","type":"or","categories":["female","male"],"considerate":{"cattle ranchers":"a"},"inconsiderate":{"cattlewomen":"female","cattlemen":"male"}},{"id":"chairmen-chairwomen","type":"or","categories":["female","male"],"considerate":{"chairs":"a","chairpersons":"a","coordinators":"a"},"inconsiderate":{"chairwomen":"female","chairmen":"male"}},{"id":"postman-postwoman","type":"or","categories":["female","male"],"considerate":{"mail carrier":"a","letter carrier":"a","postal worker":"a"},"inconsiderate":{"postwoman":"female","mailwoman":"female","postman":"male","mailman":"male"}},{"id":"postmen-postwomen","type":"or","categories":["female","male"],"considerate":{"mail carriers":"a","letter carriers":"a","postal workers":"a"},"inconsiderate":{"postwomen":"female","mailwomen":"female","postmen":"male","mailmen":"male"}},{"id":"chick-cop-policeman","type":"or","categories":["female","male"],"considerate":{"officer":"a","police officer":"a"},"inconsiderate":{"policewoman":"female","policeman":"male","chick cop":"female"}},{"id":"policemen-policewomen","type":"or","categories":["female","male"],"considerate":{"officers":"a","police officers":"a"},"inconsiderate":{"policewomen":"female","policemen":"male"}},{"id":"steward-stewardess","type":"or","categories":["female","male"],"considerate":{"flight attendant":"a"},"inconsiderate":{"stewardess":"female","steward":"male"}},{"id":"stewardesses-stewards","type":"or","categories":["female","male"],"considerate":{"flight attendants":"a"},"inconsiderate":{"stewardesses":"female","stewards":"male"}},{"id":"congressman-congresswoman","type":"or","categories":["female","male"],"considerate":{"member of congress":"a","congress person":"a","legislator":"a","representative":"a"},"inconsiderate":{"congresswoman":"female","congressman":"male"}},{"id":"congressmen-congresswomen","type":"or","categories":["female","male"],"considerate":{"members of congress":"a","congress persons":"a","legislators":"a","representatives":"a"},"inconsiderate":{"congresswomen":"female","congressmen":"male"}},{"id":"fireman-firewoman","type":"or","categories":["female","male"],"considerate":{"fire fighter":"a","fire officer":"a"},"inconsiderate":{"firewoman":"female","fireman":"male"}},{"id":"firemen-firewomen","type":"or","categories":["female","male"],"considerate":{"fire fighters":"a"},"inconsiderate":{"firewomen":"female","firemen":"male"}},{"id":"fisherman-fisherwoman","type":"or","categories":["female","male"],"considerate":{"fisher":"a","crew member":"a","fisherfolk":"a","angler":"a"},"inconsiderate":{"fisherwoman":"female","fisherman":"male"}},{"id":"fishermen-fisherwomen","type":"or","categories":["female","male"],"considerate":{"fishers":"a"},"inconsiderate":{"fisherwomen":"female","fishermen":"male"}},{"id":"brotherhood-sisterhood","type":"or","categories":["female","male"],"considerate":{"kinship":"a","community":"a"},"inconsiderate":{"sisterhood":"female","brotherhood":"male"}},{"id":"common-girl-common-man","type":"or","categories":["female","male"],"considerate":{"common person":"a","average person":"a"},"inconsiderate":{"common girl":"female","common man":"male"}},{"id":"salaryman-salarywoman","type":"or","categories":["female","male"],"considerate":{"business executive":"a","entrepreneur":"a","business person":"a","professional":"a"},"inconsiderate":{"businesswoman":"female","salarywoman":"female","businessman":"male","salaryman":"male"}},{"id":"salarymen-salarywomen","type":"or","categories":["female","male"],"considerate":{"business executives":"a","entrepreneurs":"a"},"inconsiderate":{"businesswomen":"female","salarywomen":"female","career girl":"female","career woman":"female","businessmen":"male","salarymen":"male"}},{"id":"janitor-janitress","type":"or","categories":["female","male"],"considerate":{"cleaner":"a"},"inconsiderate":{"cleaning lady":"female","cleaning girl":"female","cleaning woman":"female","janitress":"female","cleaning man":"male","cleaning boy":"male","janitor":"male"}},{"id":"janitors-janitresses","type":"or","categories":["female","male"],"considerate":{"cleaners":"a","housekeeping":"a"},"inconsiderate":{"cleaning ladies":"female","cleaning girls":"female","janitresses":"female","cleaning men":"male","janitors":"male"}},{"id":"delivery-boy-delivery-girl","type":"or","categories":["female","male"],"considerate":{"courier":"a","messenger":"a"},"inconsiderate":{"delivery girl":"female","delivery boy":"male"}},{"id":"foreman-forewoman","type":"or","categories":["female","male"],"considerate":{"supervisor":"a","shift boss":"a"},"inconsiderate":{"forewoman":"female","foreman":"male"}},{"id":"frontman,-front-man-frontwoman,-front-woman","type":"or","categories":["female","male"],"considerate":{"lead":"a","front":"a","figurehead":"a"},"inconsiderate":{"frontwoman, front woman":"female","frontman, front man":"male"}},{"id":"front-men,-frontmen-front-women,-frontwomen","type":"or","categories":["female","male"],"considerate":{"figureheads":"a"},"inconsiderate":{"front women, frontwomen":"female","front men, frontmen":"male"}},{"id":"foremen-forewomen","type":"or","categories":["female","male"],"considerate":{"supervisors":"a","shift bosses":"a"},"inconsiderate":{"forewomen":"female","foremen":"male"}},{"id":"insurance-man-insurance-woman","type":"or","categories":["female","male"],"considerate":{"insurance agent":"a"},"inconsiderate":{"insurance woman":"female","insurance man":"male"}},{"id":"insurance-men-insurance-women","type":"or","categories":["female","male"],"considerate":{"insurance agents":"a"},"inconsiderate":{"insurance women":"female","insurance men":"male"}},{"id":"landlady-landlord","type":"or","categories":["female","male"],"considerate":{"proprietor":"a","building manager":"a"},"inconsiderate":{"landlady":"female","landlord":"male"}},{"id":"landladies-landlords","type":"or","categories":["female","male"],"considerate":{"proprietors":"a","building managers":"a"},"inconsiderate":{"landladies":"female","landlords":"male"}},{"id":"alumna-alumnus","type":"or","categories":["female","male"],"considerate":{"graduate":"a"},"inconsiderate":{"alumna":"female","alumnus":"male"}},{"id":"alumnae-alumni","type":"or","categories":["female","male"],"considerate":{"graduates":"a"},"inconsiderate":{"alumnae":"female","alumni":"male"}},{"id":"newsman-newswoman","type":"or","categories":["female","male"],"considerate":{"anchor":"a","journalist":"a"},"inconsiderate":{"newswoman":"female","newspaperwoman":"female","anchorwoman":"female","newsman":"male","newspaperman":"male","anchorman":"male"}},{"id":"newsmen-newswomen","type":"or","categories":["female","male"],"considerate":{"anchors":"a","journalists":"a"},"inconsiderate":{"newswomen":"female","newspaperwomen":"female","anchorwomen":"female","newsmen":"male","newspapermen":"male","anchormen":"male"}},{"id":"repairman-repairwoman","type":"or","categories":["female","male"],"considerate":{"repairer":"a","technician":"a"},"inconsiderate":{"repairwoman":"female","repairman":"male"}},{"id":"repairmen-repairwomen","type":"or","categories":["female","male"],"considerate":{"technicians":"a"},"inconsiderate":{"repairwomen":"female","repairmen":"male"}},{"id":"saleslady-salesman","type":"or","categories":["female","male"],"considerate":{"salesperson":"a","sales clerk":"a","sales rep":"a","sales agent":"a","sales attendant":"a","seller":"a","shop assistant":"a"},"inconsiderate":{"saleswoman":"female","sales woman":"female","saleslady":"female","salesman":"male","sales man":"male"}},{"id":"salesmen-saleswomen","type":"or","categories":["female","male"],"considerate":{"sales clerks":"a","sales reps":"a","sales agents":"a","sellers":"a"},"inconsiderate":{"saleswomen":"female","sales women":"female","salesladies":"female","salesmen":"male","sales men":"male"}},{"id":"serviceman-servicewoman","type":"or","categories":["female","male"],"considerate":{"soldier":"a","service representative":"a"},"inconsiderate":{"servicewoman":"female","serviceman":"male"}},{"id":"servicemen-servicewomen","type":"or","categories":["female","male"],"considerate":{"soldiers":"a","service representatives":"a"},"inconsiderate":{"servicewomen":"female","servicemen":"male"}},{"id":"waiter-waitress","type":"or","categories":["female","male"],"considerate":{"server":"a"},"inconsiderate":{"waitress":"female","waiter":"male"}},{"id":"waiters-waitresses","type":"or","categories":["female","male"],"considerate":{"servers":"a"},"inconsiderate":{"waitresses":"female","waiters":"male"}},{"id":"workman-workwoman","type":"or","categories":["female","male"],"considerate":{"worker":"a","wage earner":"a","taxpayer":"a"},"inconsiderate":{"workwoman":"female","working woman":"female","workman":"male","working man":"male"}},{"id":"workmen-workwomen","type":"or","categories":["female","male"],"considerate":{"workers":"a"},"inconsiderate":{"workwomen":"female","workmen":"male"}},{"id":"actor-actress","type":"or","categories":["female","male"],"considerate":{"performer":"a","star":"a","artist":"a","entertainer":"a"},"inconsiderate":{"actress":"female","actor":"male"}},{"id":"actors-actresses","type":"or","categories":["female","male"],"considerate":{"performers":"a","stars":"a","artists":"a","entertainers":"a"},"inconsiderate":{"actresses":"female","actors":"male"}},{"id":"aircrewwoman-airman","type":"or","categories":["female","male"],"considerate":{"pilot":"a","aviator":"a","airstaff":"a"},"inconsiderate":{"aircrewwoman":"female","aircrew woman":"female","aircrewman":"male","airman":"male"}},{"id":"aircrewwomen-airmen","type":"or","categories":["female","male"],"considerate":{"pilots":"a","aviators":"a","airstaff":"a"},"inconsiderate":{"aircrewwomen":"female","aircrew women":"female","aircrewmen":"male","airmen":"male"}},{"id":"alderman-alderwoman","type":"or","categories":["female","male"],"considerate":{"cabinet member":"a"},"inconsiderate":{"alderwoman":"female","alderman":"male"}},{"id":"aldermen-alderwomen","type":"or","categories":["female","male"],"considerate":{"cabinet":"a","cabinet members":"a","alderperson":"a"},"inconsiderate":{"alderwomen":"female","aldermen":"male"}},{"id":"assemblyman-assemblywoman","type":"or","categories":["female","male"],"considerate":{"assembly person":"a","assembly worker":"a"},"inconsiderate":{"assemblywoman":"female","assemblyman":"male"}},{"id":"aunt-uncle","type":"or","categories":["female","male"],"considerate":{"relative":"a"},"inconsiderate":{"kinswoman":"female","aunt":"female","kinsman":"male","uncle":"male"}},{"id":"aunts-uncles","type":"or","categories":["female","male"],"considerate":{"relatives":"a"},"inconsiderate":{"kinswomen":"female","aunts":"female","kinsmen":"male","uncles":"male"}},{"id":"boogeyman-boogeywoman","type":"or","categories":["female","male"],"considerate":{"boogeymonster":"a"},"inconsiderate":{"boogeywoman":"female","boogeyman":"male"}},{"id":"boogieman-boogiewoman","type":"or","categories":["female","male"],"considerate":{"boogeymonster":"a"},"inconsiderate":{"boogiewoman":"female","boogieman":"male"}},{"id":"bogeyman-bogeywoman","type":"or","categories":["female","male"],"considerate":{"bogeymonster":"a"},"inconsiderate":{"bogeywoman":"female","bogeyman":"male"}},{"id":"bogieman-bogiewoman","type":"or","categories":["female","male"],"considerate":{"bogeymonster":"a"},"inconsiderate":{"bogiewoman":"female","bogieman":"male"}},{"id":"boogiemen-boogiewomen","type":"or","categories":["female","male"],"considerate":{"boogeymonsters":"a"},"inconsiderate":{"boogiewomen":"female","boogiemen":"male"}},{"id":"bogiemen-bogiewomen","type":"or","categories":["female","male"],"considerate":{"bogeymonsters":"a"},"inconsiderate":{"bogiewomen":"female","bogiemen":"male"}},{"id":"bondsman-bondswoman","type":"or","categories":["female","male"],"considerate":{"bonder":"a"},"inconsiderate":{"bondswoman":"female","bondsman":"male"}},{"id":"bondsmen-bondswomen","type":"or","categories":["female","male"],"considerate":{"bonders":"a"},"inconsiderate":{"bondswomen":"female","bondsmen":"male"}},{"id":"husband-wife","type":"or","categories":["female","male"],"considerate":{"partner":"a","significant other":"a","spouse":"a"},"inconsiderate":{"wife":"female","husband":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"husbands-wives","type":"or","categories":["female","male"],"considerate":{"partners":"a","significant others":"a","spouses":"a"},"inconsiderate":{"wives":"female","husbands":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"boyfriend-girlfriend","type":"or","categories":["female","male"],"considerate":{"partner":"a","friend":"a","significant other":"a"},"inconsiderate":{"girlfriend":"female","boyfriend":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"boyfriends-girlfriends","type":"or","categories":["female","male"],"considerate":{"partners":"a","friends":"a","significant others":"a"},"inconsiderate":{"girlfriends":"female","boyfriends":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"boyhood-girlhood","type":"or","categories":["female","male"],"considerate":{"childhood":"a"},"inconsiderate":{"girlhood":"female","boyhood":"male"}},{"id":"boyish-girly","type":"or","categories":["female","male"],"considerate":{"childish":"a"},"inconsiderate":{"girly":"female","girlish":"female","boyish":"male"}},{"id":"journeyman-journeywoman","type":"or","categories":["female","male"],"considerate":{"journeyperson":"a"},"inconsiderate":{"journeywoman":"female","journeyman":"male"}},{"id":"journeymen-journeywomen","type":"or","categories":["female","male"],"considerate":{"journeypersons":"a"},"inconsiderate":{"journeywomen":"female","journeymen":"male"}},{"id":"godfather-godmother","type":"or","categories":["female","male"],"considerate":{"godparent":"a","elder":"a","patron":"a"},"inconsiderate":{"godmother":"female","patroness":"female","godfather":"male"}},{"id":"granddaughter-grandson","type":"or","categories":["female","male"],"considerate":{"grandchild":"a"},"inconsiderate":{"granddaughter":"female","grandson":"male"}},{"id":"granddaughters-grandsons","type":"or","categories":["female","male"],"considerate":{"grandchildren":"a"},"inconsiderate":{"granddaughters":"female","grandsons":"male"}},{"id":"forefather-foremother","type":"or","categories":["female","male"],"considerate":{"ancestor":"a"},"inconsiderate":{"foremother":"female","forefather":"male"}},{"id":"forefathers-foremothers","type":"or","categories":["female","male"],"considerate":{"ancestors":"a"},"inconsiderate":{"foremothers":"female","forefathers":"male"}},{"id":"gramps-granny","type":"or","categories":["female","male"],"considerate":{"grandparent":"a","ancestor":"a"},"inconsiderate":{"granny":"female","grandma":"female","grandmother":"female","grandpappy":"male","granddaddy":"male","gramps":"male","grandpa":"male","grandfather":"male"}},{"id":"grandfathers-grandmothers","type":"or","categories":["female","male"],"considerate":{"grandparents":"a","ancestors":"a"},"inconsiderate":{"grandmothers":"female","grandfathers":"male"}},{"id":"bride-groom","type":"or","categories":["female","male"],"considerate":{"spouse":"a","newlywed":"a"},"inconsiderate":{"bride":"female","groom":"male"}},{"id":"brother-sister","type":"or","categories":["female","male"],"considerate":{"sibling":"a"},"inconsiderate":{"sister":"female","brother":"male"}},{"id":"brothers-sisters","type":"or","categories":["female","male"],"considerate":{"siblings":"a"},"inconsiderate":{"sisters":"female","brothers":"male"}},{"id":"cameraman-camerawoman","type":"or","categories":["female","male"],"considerate":{"camera operator":"a","camera person":"a"},"inconsiderate":{"camerawoman":"female","cameraman":"male"}},{"id":"cameramen-camerawomen","type":"or","categories":["female","male"],"considerate":{"camera operators":"a"},"inconsiderate":{"camerawomen":"female","cameramen":"male"}},{"id":"caveman-cavewoman","type":"or","categories":["female","male"],"considerate":{"troglodyte":"a","hominidae":"a"},"inconsiderate":{"cavewoman":"female","caveman":"male"}},{"id":"cavemen-cavewomen","type":"or","categories":["female","male"],"considerate":{"troglodytae":"a","troglodyti":"a","troglodytes":"a","hominids":"a"},"inconsiderate":{"cavewomen":"female","cavemen":"male"}},{"id":"clergyman-clergywoman","type":"or","categories":["female","male"],"considerate":{"clergyperson":"a","clergy":"a","cleric":"a"},"inconsiderate":{"clergywoman":"female","clergyman":"male"}},{"id":"clergymen-clergywomen","type":"or","categories":["female","male"],"considerate":{"clergies":"a","clerics":"a"},"inconsiderate":{"clergywomen":"female","clergymen":"male"}},{"id":"councilman-councilwoman","type":"or","categories":["female","male"],"considerate":{"council member":"a"},"inconsiderate":{"councilwoman":"female","councilman":"male"}},{"id":"councilmen-councilwomen","type":"or","categories":["female","male"],"considerate":{"council members":"a"},"inconsiderate":{"councilwomen":"female","councilmen":"male"}},{"id":"countryman-countrywoman","type":"or","categories":["female","male"],"considerate":{"country person":"a"},"inconsiderate":{"countrywoman":"female","countryman":"male"}},{"id":"countrymen-countrywomen","type":"or","categories":["female","male"],"considerate":{"country folk":"a"},"inconsiderate":{"countrywomen":"female","countrymen":"male"}},{"id":"handyman-handywoman","type":"or","categories":["female","male"],"considerate":{"artisan":"a","craftsperson":"a","skilled worker":"a"},"inconsiderate":{"handywoman":"female","craftswoman":"female","handyman":"male","craftsman":"male"}},{"id":"host-hostess","type":"or","categories":["female","male"],"considerate":{"presenter":"a","entertainer":"a","emcee":"a"},"inconsiderate":{"hostess":"female","host":"male"}},{"id":"hostesses-hosts","type":"or","categories":["female","male"],"considerate":{"presenters":"a","entertainers":"a","emcees":"a"},"inconsiderate":{"hostesses":"female","hosts":"male"}},{"id":"handymen-handywomen","type":"or","categories":["female","male"],"considerate":{"artisans":"a","craftspersons":"a","skilled workers":"a"},"inconsiderate":{"handywomen":"female","craftswomen":"female","handymen":"male","craftsmen":"male"}},{"id":"hangman-hangwoman","type":"or","categories":["female","male"],"considerate":{"guillotine":"a"},"inconsiderate":{"hangwoman":"female","hangman":"male"}},{"id":"hangmen-hangwomen","type":"or","categories":["female","male"],"considerate":{"guillotines":"a"},"inconsiderate":{"hangwomen":"female","hangmen":"male"}},{"id":"henchman-henchwoman","type":"or","categories":["female","male"],"considerate":{"sidekick":"a"},"inconsiderate":{"henchwoman":"female","henchman":"male"}},{"id":"henchmen-henchwomen","type":"or","categories":["female","male"],"considerate":{"sidekicks":"a"},"inconsiderate":{"henchwomen":"female","henchmen":"male"}},{"id":"hero-heroine","type":"or","categories":["female","male"],"considerate":{"role-model":"a","mentor":"a"},"inconsiderate":{"heroine":"female","hero":"male"}},{"id":"heroes-heroines","type":"or","categories":["female","male"],"considerate":{"role-models":"a","mentor":"a"},"inconsiderate":{"heroines":"female","heroes":"male"}},{"id":"maternal-paternal","type":"or","categories":["female","male"],"considerate":{"parental":"a","warm":"a","intimate":"a"},"inconsiderate":{"maternal":"female","paternal":"male","fraternal":"male"}},{"id":"maternity-paternity","type":"or","categories":["female","male"],"considerate":{"parental":"a"},"inconsiderate":{"maternity":"female","paternity":"male"}},{"id":"dads-moms","type":"or","categories":["female","male"],"considerate":{"parents":"a"},"inconsiderate":{"mamas":"female","mothers":"female","moms":"female","mums":"female","mommas":"female","mommies":"female","papas":"male","fathers":"male","dads":"male","daddies":"male"}},{"id":"dad-mom","type":"or","categories":["female","male"],"considerate":{"parent":"a"},"inconsiderate":{"mama":"female","mother":"female","mom":"female","mum":"female","momma":"female","mommy":"female","papa":"male","father":"male","dad":"male","pop":"male","daddy":"male"}},{"id":"daughter-son","type":"or","categories":["female","male"],"considerate":{"child":"a"},"inconsiderate":{"daughter":"female","son":"male"}},{"id":"daughters-sons","type":"or","categories":["female","male"],"considerate":{"children":"a"},"inconsiderate":{"daughters":"female","sons":"male"}},{"id":"doorman-doorwoman","type":"or","categories":["female","male"],"considerate":{"concierge":"a"},"inconsiderate":{"doorwoman":"female","doorman":"male"}},{"id":"doormen-doorwomen","type":"or","categories":["female","male"],"considerate":{"concierges":"a"},"inconsiderate":{"doorwomen":"female","doormen":"male"}},{"id":"feminin-manly","type":"or","categories":["female","male"],"considerate":{"humanly":"a","mature":"a"},"inconsiderate":{"feminin":"female","dudely":"male","manly":"male"}},{"id":"females-males","type":"or","categories":["female","male"],"considerate":{"humans":"a"},"inconsiderate":{"females":"female","males":"male"}},{"id":"king-queen","type":"or","categories":["female","male"],"considerate":{"ruler":"a"},"inconsiderate":{"empress":"female","queen":"female","emperor":"male","king":"male"}},{"id":"kings-queens","type":"or","categories":["female","male"],"considerate":{"rulers":"a"},"inconsiderate":{"empresses":"female","queens":"female","emperors":"male","kings":"male"}},{"id":"kingsize-queensize","type":"or","categories":["female","male"],"considerate":{"jumbo":"a","gigantic":"a"},"inconsiderate":{"queensize":"female","kingsize":"male"}},{"id":"kingmaker-queenmaker","type":"or","categories":["female","male"],"considerate":{"power behind the throne":"a"},"inconsiderate":{"queenmaker":"female","kingmaker":"male"}},{"id":"layman-laywoman","type":"or","categories":["female","male"],"considerate":{"civilian":"a"},"inconsiderate":{"laywoman":"female","layman":"male"}},{"id":"laymen-laywomen","type":"or","categories":["female","male"],"considerate":{"civilians":"a"},"inconsiderate":{"laywomen":"female","laymen":"male"}},{"id":"dame-lord","type":"or","categories":["female","male"],"considerate":{"official":"a","owner":"a","expert":"a","superior":"a","chief":"a","ruler":"a"},"inconsiderate":{"dame":"female","lord":"male"}},{"id":"dames-lords","type":"or","categories":["female","male"],"considerate":{"officials":"a","masters":"a","chiefs":"a","rulers":"a"},"inconsiderate":{"dames":"female","lords":"male"}},{"id":"manhood-womanhood","type":"or","categories":["female","male"],"considerate":{"adulthood":"a","personhood":"a","maturity":"a"},"inconsiderate":{"womanhood":"female","masculinity":"male","manhood":"male"}},{"id":"femininity-manliness","type":"or","categories":["female","male"],"considerate":{"humanity":"a"},"inconsiderate":{"femininity":"female","manliness":"male"}},{"id":"marksman-markswoman","type":"or","categories":["female","male"],"considerate":{"shooter":"a"},"inconsiderate":{"markswoman":"female","marksman":"male"}},{"id":"marksmen-markswomen","type":"or","categories":["female","male"],"considerate":{"shooters":"a"},"inconsiderate":{"markswomen":"female","marksmen":"male"}},{"id":"middleman-middlewoman","type":"or","categories":["female","male"],"considerate":{"intermediary":"a","go-between":"a"},"inconsiderate":{"middlewoman":"female","middleman":"male"}},{"id":"middlemen-middlewomen","type":"or","categories":["female","male"],"considerate":{"intermediaries":"a","go-betweens":"a"},"inconsiderate":{"middlewomen":"female","middlemen":"male"}},{"id":"milkman-milkwoman","type":"or","categories":["female","male"],"considerate":{"milk person":"a"},"inconsiderate":{"milkwoman":"female","milkman":"male"}},{"id":"milkmen-milkwomen","type":"or","categories":["female","male"],"considerate":{"milk people":"a"},"inconsiderate":{"milkwomen":"female","milkmen":"male"}},{"id":"nephew-niece","type":"or","categories":["female","male"],"considerate":{"nibling":"a","sibling’s child":"a"},"inconsiderate":{"niece":"female","nephew":"male"}},{"id":"nephews-nieces","type":"or","categories":["female","male"],"considerate":{"niblings":"a","sibling’s children":"a"},"inconsiderate":{"nieces":"female","nephews":"male"}},{"id":"nobleman-noblewoman","type":"or","categories":["female","male"],"considerate":{"noble":"a"},"inconsiderate":{"noblewoman":"female","nobleman":"male"}},{"id":"noblemen-noblewomen","type":"or","categories":["female","male"],"considerate":{"nobles":"a"},"inconsiderate":{"noblewomen":"female","noblemen":"male"}},{"id":"ombudsman-ombudswoman","type":"or","categories":["female","male"],"considerate":{"notary":"a","consumer advocate":"a","trouble shooter":"a","omsbudperson":"a","mediator":"a"},"inconsiderate":{"ombudswoman":"female","ombudsman":"male"}},{"id":"ombudsmen-ombudswomen","type":"or","categories":["female","male"],"considerate":{"notaries":"a","omsbudpersons":"a","omsbudpeople":"a","mediators":"a"},"inconsiderate":{"ombudswomen":"female","ombudsmen":"male"}},{"id":"prince-princess","type":"or","categories":["female","male"],"considerate":{"heir":"a"},"inconsiderate":{"princess":"female","prince":"male"}},{"id":"princes-princesses","type":"or","categories":["female","male"],"considerate":{"heirs":"a"},"inconsiderate":{"princesses":"female","princes":"male"}},{"id":"sandman-sandwoman","type":"or","categories":["female","male"],"considerate":{"fairy":"a"},"inconsiderate":{"sandwoman":"female","sandman":"male"}},{"id":"sandmen-sandwomen","type":"or","categories":["female","male"],"considerate":{"fairies":"a"},"inconsiderate":{"sandwomen":"female","sandmen":"male"}},{"id":"showman-showwoman","type":"or","categories":["female","male"],"considerate":{"promoter":"a"},"inconsiderate":{"showwoman":"female","showman":"male"}},{"id":"showmen-showwomen","type":"or","categories":["female","male"],"considerate":{"promoters":"a"},"inconsiderate":{"showwomen":"female","show women":"female","showmen":"male"}},{"id":"spaceman-spacewoman","type":"or","categories":["female","male"],"considerate":{"astronaut":"a"},"inconsiderate":{"spacewoman":"female","spaceman":"male"}},{"id":"spacemen-spacewomen","type":"or","categories":["female","male"],"considerate":{"astronauts":"a"},"inconsiderate":{"spacewomen":"female","spacemen":"male"}},{"id":"spokesman-spokeswoman","type":"or","categories":["female","male"],"considerate":{"speaker":"a","spokesperson":"a","representative":"a"},"inconsiderate":{"spokeswoman":"female","spokesman":"male"}},{"id":"spokesmen-spokeswomen","type":"or","categories":["female","male"],"considerate":{"speakers":"a","spokespersons":"a"},"inconsiderate":{"spokeswomen":"female","spokesmen":"male"}},{"id":"sportsman-sportswoman","type":"or","categories":["female","male"],"considerate":{"athlete":"a","sports person":"a"},"inconsiderate":{"sportswoman":"female","sportsman":"male"}},{"id":"sportsmen-sportswomen","type":"or","categories":["female","male"],"considerate":{"athletes":"a","sports persons":"a"},"inconsiderate":{"sportswomen":"female","sportsmen":"male"}},{"id":"statesman-stateswoman","type":"or","categories":["female","male"],"considerate":{"senator":"a"},"inconsiderate":{"stateswoman":"female","statesman":"male"}},{"id":"stepbrother-stepsister","type":"or","categories":["female","male"],"considerate":{"step-sibling":"a"},"inconsiderate":{"stepsister":"female","stepbrother":"male"}},{"id":"stepbrothers-stepsisters","type":"or","categories":["female","male"],"considerate":{"step-siblings":"a"},"inconsiderate":{"stepsisters":"female","stepbrothers":"male"}},{"id":"stepdad-stepmom","type":"or","categories":["female","male"],"considerate":{"step-parent":"a"},"inconsiderate":{"stepmom":"female","stepmother":"female","stepdad":"male","stepfather":"male"}},{"id":"stepfathers-stepmothers","type":"or","categories":["female","male"],"considerate":{"step-parents":"a"},"inconsiderate":{"stepmothers":"female","stepfathers":"male"}},{"id":"superman-superwoman","type":"or","categories":["female","male"],"considerate":{"titan":"a"},"inconsiderate":{"superwoman":"female","superman":"male"}},{"id":"supermen-superwomen","type":"or","categories":["female","male"],"considerate":{"titans":"a"},"inconsiderate":{"superwomen":"female","supermen":"male"}},{"id":"unmanly-unwomanly","type":"or","categories":["female","male"],"considerate":{"inhumane":"a"},"inconsiderate":{"unwomanly":"female","unwomenly":"female","unmanly":"male","unmenly":"male"}},{"id":"watchman-watchwoman","type":"or","categories":["female","male"],"considerate":{"watcher":"a"},"inconsiderate":{"watchwoman":"female","watchman":"male"}},{"id":"watchmen-watchwomen","type":"or","categories":["female","male"],"considerate":{"watchers":"a"},"inconsiderate":{"watchwomen":"female","watchmen":"male"}},{"id":"weatherman-weatherwoman","type":"or","categories":["female","male"],"considerate":{"weather forecaster":"a","meteorologist":"a"},"inconsiderate":{"weatherwoman":"female","weatherman":"male"}},{"id":"weathermen-weatherwomen","type":"or","categories":["female","male"],"considerate":{"weather forecasters":"a","meteorologists":"a"},"inconsiderate":{"weatherwomen":"female","weathermen":"male"}},{"id":"widow-widower","type":"or","categories":["female","male"],"considerate":{"bereaved":"a"},"inconsiderate":{"widow":"female","widows":"female","widower":"male","widowers":"male"}},{"id":"own-man-own-woman","type":"or","categories":["female","male"],"considerate":{"own person":"a"},"inconsiderate":{"own woman":"female","own man":"male"}},{"id":"frenchmen","type":"simple","categories":["male"],"considerate":{"french":"a","the french":"a"},"inconsiderate":{"frenchmen":"male"}},{"id":"ladylike","type":"simple","categories":["female"],"considerate":{"courteous":"a","cultured":"a"},"inconsiderate":{"ladylike":"female"}},{"id":"like-a-man","type":"simple","categories":["male"],"considerate":{"resolutely":"a","bravely":"a"},"inconsiderate":{"like a man":"male"}},{"id":"maiden-name","type":"simple","categories":["female"],"considerate":{"birth name":"a"},"inconsiderate":{"maiden name":"female"}},{"id":"maiden-voyage","type":"simple","categories":["female"],"considerate":{"first voyage":"a"},"inconsiderate":{"maiden voyage":"female"}},{"id":"man-enough","type":"simple","categories":["male"],"considerate":{"strong enough":"a"},"inconsiderate":{"man enough":"male"}},{"id":"oneupmanship","type":"simple","categories":["male"],"considerate":{"upstaging":"a","competitiveness":"a"},"inconsiderate":{"oneupmanship":"male"}},{"id":"mrs-","type":"simple","categories":["female"],"considerate":{"ms.":"a"},"inconsiderate":{"miss.":"female","mrs.":"female"}},{"id":"manmade","type":"simple","categories":["male"],"considerate":{"manufactured":"a","artificial":"a","synthetic":"a","machine-made":"a","constructed":"a"},"inconsiderate":{"manmade":"male"}},{"id":"man-of-action","type":"simple","categories":["male"],"considerate":{"dynamo":"a"},"inconsiderate":{"man of action":"male"}},{"id":"man-of-letters","type":"simple","categories":["male"],"considerate":{"scholar":"a","writer":"a","literary figure":"a"},"inconsiderate":{"man of letters":"male"}},{"id":"man-of-the-world","type":"simple","categories":["male"],"considerate":{"sophisticate":"a"},"inconsiderate":{"man of the world":"male"}},{"id":"fellowship","type":"simple","categories":["male"],"considerate":{"camaraderie":"a","community":"a","organization":"a"},"inconsiderate":{"fellowship":"male"}},{"id":"freshman","type":"simple","categories":["male"],"considerate":{"first-year student":"a","fresher":"a"},"inconsiderate":{"freshman":"male","freshwoman":"male"}},{"id":"workmanship","type":"simple","categories":["male"],"considerate":{"quality construction":"a","expertise":"a"},"inconsiderate":{"workmanship":"male"}},{"id":"housewife","type":"simple","categories":["female"],"considerate":{"homemaker":"a","homeworker":"a"},"inconsiderate":{"housewife":"female"}},{"id":"housewives","type":"simple","categories":["female"],"considerate":{"homemakers":"a","homeworkers":"a"},"inconsiderate":{"housewives":"female"}},{"id":"motherly","type":"simple","categories":["female"],"considerate":{"loving":"a","warm":"a","nurturing":"a"},"inconsiderate":{"motherly":"female"}},{"id":"manpower","type":"simple","categories":["male"],"considerate":{"human resources":"a","workforce":"a","personnel":"a","staff":"a","labor":"a","labor force":"a","staffing":"a","combat personnel":"a"},"inconsiderate":{"manpower":"male"}},{"id":"master-of-ceremonies","type":"simple","categories":["male"],"considerate":{"emcee":"a","moderator":"a","convenor":"a"},"inconsiderate":{"master of ceremonies":"male"}},{"id":"masterful","type":"simple","categories":["male"],"considerate":{"skilled":"a","authoritative":"a","commanding":"a"},"inconsiderate":{"masterful":"male"}},{"id":"mastermind","type":"simple","categories":["male"],"considerate":{"genius":"a","creator":"a","instigator":"a","oversee":"a","launch":"a","originate":"a"},"inconsiderate":{"mastermind":"male"}},{"id":"masterpiece","type":"simple","categories":["male"],"considerate":{"work of genius":"a","chef d’oeuvre":"a"},"inconsiderate":{"masterpiece":"male"}},{"id":"masterplan","type":"simple","categories":["male"],"considerate":{"vision":"a","comprehensive plan":"a"},"inconsiderate":{"masterplan":"male"}},{"id":"masterstroke","type":"simple","categories":["male"],"considerate":{"trump card":"a","stroke of genius":"a"},"inconsiderate":{"masterstroke":"male"}},{"id":"madman","type":"simple","categories":["male"],"considerate":{"fanatic":"a","zealot":"a","enthusiast":"a"},"inconsiderate":{"madman":"male","mad man":"male"}},{"id":"madmen","type":"simple","categories":["male"],"considerate":{"maniacs":"a","enthusiasts":"a"},"inconsiderate":{"madmen":"male","mad men":"male"}},{"id":"mankind","type":"simple","categories":["male"],"considerate":{"humankind":"a"},"inconsiderate":{"mankind":"male"}},{"id":"manhour","type":"simple","categories":["male"],"considerate":{"staff hour":"a","hour of work":"a"},"inconsiderate":{"manhour":"male","man hour":"male"}},{"id":"manhours","type":"simple","categories":["male"],"considerate":{"staff hours":"a","hours of work":"a","hours of labor":"a","hours":"a"},"inconsiderate":{"manhours":"male","man hours":"male"}},{"id":"manned","type":"simple","categories":["a"],"considerate":{"staffed":"a","crewed":"a","piloted":"a"},"inconsiderate":{"manned":"a"},"note":"Using gender neutral language means users will help to break up gender stereotypes."},{"id":"unmanned","type":"simple","categories":["a"],"considerate":{"robotic":"a","automated":"a"},"inconsiderate":{"unmanned":"a"},"note":"Using gender neutral language means users will help to break up gender stereotypes."},{"id":"moaning","type":"simple","categories":["a"],"considerate":{"whining":"a","complaining":"a","crying":"a"},"inconsiderate":{"bitching":"a","moaning":"a"}},{"id":"moan","type":"simple","categories":["a"],"considerate":{"whine":"a","complain":"a","cry":"a"},"inconsiderate":{"bitch":"a","moan":"a"}},{"id":"wifebeater","type":"simple","categories":["a"],"considerate":{"tank top":"a","sleeveless undershirt":"a"},"inconsiderate":{"wife beater":"a","wifebeater":"a"}},{"id":"ancient-man","type":"simple","categories":["a"],"considerate":{"ancient civilization":"a","ancient people":"a"},"inconsiderate":{"ancient man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"authoress","type":"simple","categories":["a"],"considerate":{"author":"a","writer":"a"},"inconsiderate":{"authoress":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"average-housewife","type":"simple","categories":["a"],"considerate":{"average consumer":"a","average household":"a","average homemaker":"a"},"inconsiderate":{"average housewife":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"average-man","type":"simple","categories":["a"],"considerate":{"average person":"a"},"inconsiderate":{"average man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"average-working-man","type":"simple","categories":["a"],"considerate":{"average wage earner":"a","average taxpayer":"a"},"inconsiderate":{"average working man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"aviatrix","type":"simple","categories":["a"],"considerate":{"aviator":"a"},"inconsiderate":{"aviatrix":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"brotherhood-of-man","type":"simple","categories":["a"],"considerate":{"the human family":"a"},"inconsiderate":{"brotherhood of man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"calendar-girl","type":"simple","categories":["a"],"considerate":{"model":"a"},"inconsiderate":{"calendar girl":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"call-girl","type":"simple","categories":["a"],"considerate":{"escort":"a","prostitute":"a","sex worker":"a"},"inconsiderate":{"call girl":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"churchman","type":"simple","categories":["a"],"considerate":{"cleric":"a","practicing Christian":"a","pillar of the Church":"a"},"inconsiderate":{"churchman":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"english-master","type":"simple","categories":["a"],"considerate":{"english coordinator":"a","senior teacher of english":"a"},"inconsiderate":{"english master":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"englishmen","type":"simple","categories":["a"],"considerate":{"the english":"a"},"inconsiderate":{"englishmen":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"executrix","type":"simple","categories":["a"],"considerate":{"executor":"a"},"inconsiderate":{"executrix":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"father-of-*","type":"simple","categories":["a"],"considerate":{"founder of":"a"},"inconsiderate":{"father of *":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"founding-father","type":"simple","categories":["a"],"considerate":{"the founders":"a","founding leaders":"a","forebears":"a"},"inconsiderate":{"founding father":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"housemaid","type":"simple","categories":["a"],"considerate":{"house worker":"a","domestic help":"a"},"inconsiderate":{"housemaid":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"industrial-man","type":"simple","categories":["a"],"considerate":{"industrial civilization":"a","industrial people":"a"},"inconsiderate":{"industrial man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"lady-doctor","type":"simple","categories":["a"],"considerate":{"doctor":"a"},"inconsiderate":{"lady doctor":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"leading-lady","type":"simple","categories":["a"],"considerate":{"lead":"a"},"inconsiderate":{"leading lady":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"maiden","type":"simple","categories":["a"],"considerate":{"virgin":"a"},"inconsiderate":{"maiden":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"maiden-race","type":"simple","categories":["a"],"considerate":{"first race":"a"},"inconsiderate":{"maiden race":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"maiden-speech","type":"simple","categories":["a"],"considerate":{"first speech":"a"},"inconsiderate":{"maiden speech":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-a-desk","type":"simple","categories":["a"],"considerate":{"staff a desk":"a"},"inconsiderate":{"man a desk":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-in-the-street","type":"simple","categories":["a"],"considerate":{"ordinary citizen":"a","typical person":"a","average person":"a"},"inconsiderate":{"man in the street":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-of-the-land","type":"simple","categories":["a"],"considerate":{"farmer":"a","rural worker":"a","grazier":"a","landowner":"a","rural community":"a","country people":"a","country folk":"a"},"inconsiderate":{"man of the land":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"mans-best-friend","type":"simple","categories":["a"],"considerate":{"a faithful dog":"a"},"inconsiderate":{"mans best friend":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-the-booth","type":"simple","categories":["a"],"considerate":{"staff the booth":"a"},"inconsiderate":{"man the booth":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-the-phones","type":"simple","categories":["a"],"considerate":{"answer the phones":"a"},"inconsiderate":{"man the phones":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"mansized-task","type":"simple","categories":["a"],"considerate":{"a demanding task":"a","a big job":"a"},"inconsiderate":{"mansized task":"a","man sized task":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"master-key","type":"simple","categories":["a"],"considerate":{"pass key":"a","original":"a"},"inconsiderate":{"master key":"a","master copy":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"master-plan","type":"simple","categories":["a"],"considerate":{"grand scheme":"a","guiding principles":"a"},"inconsiderate":{"master plan":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"master-the-art","type":"simple","categories":["a"],"considerate":{"become skilled":"a"},"inconsiderate":{"master the art":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"men-of-science","type":"simple","categories":["a"],"considerate":{"scientists":"a"},"inconsiderate":{"men of science":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"midwife","type":"simple","categories":["a"],"considerate":{"birthing nurse":"a"},"inconsiderate":{"midwife":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"modern-man","type":"simple","categories":["a"],"considerate":{"modern civilization":"a","modern people":"a"},"inconsiderate":{"modern man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"no-mans-land","type":"simple","categories":["a"],"considerate":{"unoccupied territory":"a","wasteland":"a","deathtrap":"a"},"inconsiderate":{"no mans land":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"office-girls","type":"simple","categories":["a"],"considerate":{"administrative staff":"a"},"inconsiderate":{"office girls":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"poetess","type":"simple","categories":["a"],"considerate":{"poet":"a"},"inconsiderate":{"poetess":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"railwayman","type":"simple","categories":["a"],"considerate":{"railway worker":"a"},"inconsiderate":{"railwayman":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"sportsmanlike","type":"simple","categories":["a"],"considerate":{"fair":"a","sporting":"a"},"inconsiderate":{"sportsmanlike":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"sportsmanship","type":"simple","categories":["a"],"considerate":{"fairness":"a","good humor":"a","sense of fair play":"a"},"inconsiderate":{"sportsmanship":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"statesmanlike","type":"simple","categories":["a"],"considerate":{"diplomatic":"a"},"inconsiderate":{"statesmanlike":"a","statesman like":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"stockman","type":"simple","categories":["a"],"considerate":{"cattle worker":"a","farmhand":"a","drover":"a"},"inconsiderate":{"stockman":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"tradesmans-entrance","type":"simple","categories":["a"],"considerate":{"service entrance":"a"},"inconsiderate":{"tradesmans entrance":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"tax-man","type":"simple","categories":["a"],"considerate":{"tax commissioner":"a","tax office":"a","tax collector":"a"},"inconsiderate":{"tax man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"usherette","type":"simple","categories":["a"],"considerate":{"usher":"a"},"inconsiderate":{"usherette":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"woman-lawyer","type":"simple","categories":["a"],"considerate":{"lawyer":"a"},"inconsiderate":{"woman lawyer":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"woman-painter","type":"simple","categories":["a"],"considerate":{"painter":"a"},"inconsiderate":{"woman painter":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"working-wife","type":"simple","categories":["a"],"considerate":{"wage or salary earning woman":"a","two-income family":"a"},"inconsiderate":{"working mother":"a","working wife":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"homosexual","type":"simple","categories":["a"],"considerate":{"gay":"a","gay man":"a","lesbian":"a","gay person/people":"a"},"inconsiderate":{"homosexual":"a"},"note":"This term has a clinical history and is used to imply LGBTQ+ people are diseased or psychologically/emotionally disordered (source: https://www.glaad.org/reference/offensive)"},{"id":"homosexual-relations","type":"simple","categories":["a"],"considerate":{"relationship":"a"},"inconsiderate":{"homosexual relations":"a","homosexual relationship":"a"},"note":"Avoid labeling something as LGBTQ+ unless you would call the same thing \"straight\" (source: https://www.glaad.org/reference/offensive)"},{"id":"homosexual-couple","type":"simple","categories":["a"],"considerate":{"couple":"a"},"inconsiderate":{"homosexual couple":"a"},"note":"Avoid labeling something as LGBTQ+ unless you would call the same thing \"straight\" (source: https://www.glaad.org/reference/offensive)"},{"id":"sexual-preference","type":"simple","categories":["a"],"considerate":{"sexual orientation":"a","orientation":"a"},"inconsiderate":{"sexual preference":"a"},"note":"Implies that being LGBTQ+ is a choice (source: https://www.glaad.org/reference/offensive)"},{"id":"gay-lifestyle","type":"simple","categories":["a"],"considerate":{"gay lives":"a","gay/lesbian lives":"a"},"inconsiderate":{"gay lifestyle":"a","homosexual lifestyle":"a"},"note":"Implies that being LGBTQ+ is a choice (source: https://www.glaad.org/reference/offensive)"},{"id":"gay-agenda","type":"simple","categories":["a"],"considerate":{"gay issues":"a"},"inconsiderate":{"gay agenda":"a","homosexual agenda":"a"},"note":"Used by anti-LGBTQ+ extremists to create a climate of fear around LGBTQ+ issues (source: https://www.glaad.org/reference/offensive)"},{"id":"gay-rights","type":"simple","categories":["a"],"considerate":{"equal rights":"a","civil rights for gay people":"a"},"inconsiderate":{"special rights":"a","gay rights":"a"},"note":"LGBTQ+ rights are human rights (source: https://www.glaad.org/reference/style)"},{"id":"fag","type":"simple","categories":["a"],"considerate":{"gay":"a"},"inconsiderate":{"fag":"a","faggot":"a","dyke":"a","homo":"a","sodomite":"a"},"note":"Derogatory terms for LGBTQ+ are offensive (source: https://www.glaad.org/reference/offensive)"},{"id":"bi","type":"simple","categories":["a"],"considerate":{"bisexual":"a"},"inconsiderate":{"bi":"a"},"note":"Source: https://www.glaad.org/reference/style"},{"id":"homosexual-marriage","type":"simple","categories":["a"],"considerate":{"gay marriage":"a","same-sex marriage":"a"},"inconsiderate":{"homosexual marriage":"a"},"note":"Source: https://www.glaad.org/reference/style"},{"id":"tranny","type":"simple","categories":["a"],"considerate":{"transgender":"a"},"inconsiderate":{"tranny":"a"},"note":"Source: https://www.glaad.org/reference/style"},{"id":"transvestite","type":"simple","categories":["a"],"considerate":{"cross-dresser":"a"},"inconsiderate":{"transvestite":"a"},"note":"Source: https://www.glaad.org/reference/transgender"},{"id":"sexchange","type":"simple","categories":["a"],"considerate":{"transition":"a"},"inconsiderate":{"sexchange":"a","sex change":"a"},"note":"Source: https://www.glaad.org/reference/transgender"},{"id":"sex-change-operation","type":"simple","categories":["a"],"considerate":{"sex reassignment surgery":"a"},"inconsiderate":{"sex change operation":"a"},"note":"Source: https://www.glaad.org/reference/transgender"},{"id":"transgenders","type":"simple","categories":["a"],"considerate":{"transgender people":"a"},"inconsiderate":{"transgenders":"a"},"note":"Transgender should be used as an adjective, not as a noun. (source: https://www.glaad.org/reference/transgender)"},{"id":"transgendered","type":"simple","categories":["a"],"considerate":{"transgender":"a"},"inconsiderate":{"transgendered":"a"},"note":"Transgender is not an adjective. It's a noun like woman or man. (source: https://www.glaad.org/reference/transgender)"},{"id":"transgenderism","type":"simple","categories":["a"],"considerate":{"being transgender":"a","the movement for transgender equality":"a"},"inconsiderate":{"transgenderism":"a"},"note":"Source: https://www.glaad.org/reference/transgender"},{"id":"born-a-man","type":"simple","categories":["a"],"considerate":{"assigned male at birth":"a","designated male at birth":"a"},"inconsiderate":{"biologically male":"a","born a man":"a","genetically male":"a"},"note":"Assigned birth gender is complicated. Gender identity is more than what your parent(s) decided you were at birth."},{"id":"born-a-woman","type":"simple","categories":["a"],"considerate":{"assigned female at birth":"a","designated female at birth":"a"},"inconsiderate":{"biologically female":"a","born a woman":"a","genetically female":"a"},"note":"Assigned birth gender is complicated. Gender identity is more than what your parent(s) decided you were at birth."},{"id":"bathroom-bill","type":"simple","categories":["a"],"considerate":{"non-discrimination law":"a","non-discrimination ordinance":"a"},"inconsiderate":{"bathroom bill":"a"},"note":"Source: https://www.glaad.org/reference/transgender"},{"id":"hermaphroditic","type":"simple","categories":["a"],"considerate":{"intersex":"a"},"inconsiderate":{"hermaphroditic":"a","pseudohermaphroditic":"a","pseudo hermaphroditic":"a"},"note":"Source: http://www.isna.org/node/979"},{"id":"hermaphrodite","type":"simple","categories":["a"],"considerate":{"person who is intersex":"a","person":"a","intersex person":"a"},"inconsiderate":{"hermaphrodite":"a","pseudohermaphrodite":"a","pseudo hermaphrodite":"a"},"note":"Source: http://www.isna.org/node/979"},{"id":"heshe","type":"simple","categories":["a"],"considerate":{"transgender person":"a","person":"a"},"inconsiderate":{"shemale":"a","she male":"a","heshe":"a","shehe":"a"},"note":"Transgender people prefer to be called by their chosen pronouns. If you're confused, just ask what pronouns they prefer. (source: https://www.reddit.com/r/asktransgender/comments/23wbq1/is_the_term_shemale_seen_as_offensive/)"},{"id":"islamist","type":"simple","categories":["a"],"considerate":{"muslim":"a","person of Islamic faith":"a","fanatic":"a","zealot":"a","follower of islam":"a","follower of the islamic faith":"a"},"inconsiderate":{"islamist":"a"},"note":"Source: https://www.usnews.com/news/newsgram/articles/2013/04/04/the-associated-press-revises-islamist-another-politically-charged-term"},{"id":"islamists","type":"simple","categories":["a"],"considerate":{"muslims":"a","people of Islamic faith":"a","fanatics":"a","zealots":"a"},"inconsiderate":{"islamists":"a"},"note":"Source: https://www.usnews.com/news/newsgram/articles/2013/04/04/the-associated-press-revises-islamist-another-politically-charged-term"},{"id":"master-slave","type":"and","categories":["a","b"],"considerate":{"primary":"a","primaries":"a","hub":"a","hubs":"a","reference":"a","references":"a","replica":"b","replicas":"b","spoke":"b","spokes":"b","secondary":"b","secondaries":"b"},"inconsiderate":{"master":"a","masters":"a","slave":"b","slaves":"b"}},{"id":"eskimo","type":"simple","categories":["a"],"considerate":{"Inuit":"a"},"inconsiderate":{"eskimo":"a"}},{"id":"eskimos","type":"simple","categories":["a"],"considerate":{"Inuits":"a"},"inconsiderate":{"eskimos":"a"}},{"id":"oriental","type":"simple","categories":["a"],"considerate":{"Asian person":"a"},"inconsiderate":{"oriental":"a"}},{"id":"orientals","type":"simple","categories":["a"],"considerate":{"Asian people":"a"},"inconsiderate":{"orientals":"a"}},{"id":"nonwhite","type":"simple","categories":["a"],"considerate":{"person of color":"a","people of color":"a"},"inconsiderate":{"nonwhite":"a","non white":"a"}},{"id":"ghetto","type":"simple","categories":["a"],"considerate":{"projects":"a","urban":"a"},"inconsiderate":{"ghetto":"a"}},{"id":"redskin","type":"simple","categories":["a"],"considerate":{"Native American":"a"},"inconsiderate":{"red indian":"a","pocahontas":"a","redskin":"a"}},{"id":"redskins","type":"simple","categories":["a"],"considerate":{"Native American People":"a"},"inconsiderate":{"red indians":"a","redskins":"a"}},{"id":"indian-give","type":"simple","categories":["a"],"considerate":{"go back on one's offer":"a"},"inconsiderate":{"indian give":"a","indian giver":"a"}},{"id":"pinoys","type":"simple","categories":["a"],"considerate":{"Filipinos":"a","Filipino people":"a"},"inconsiderate":{"pinoys":"a","pinays":"a"}},{"id":"towel-heads","type":"simple","categories":["a"],"considerate":{"Arabs":"a","Middle Eastern People":"a"},"inconsiderate":{"sand niggers":"a","towel heads":"a"}},{"id":"latino","type":"simple","categories":["a"],"considerate":{"Latinx":"a"},"inconsiderate":{"latino":"a","latina":"a","mexican":"a"},"note":"Whenever possible , always try to be gender inclusive."},{"id":"japs","type":"simple","categories":["a"],"considerate":{"Japanese person":"a","Japanese people":"a"},"inconsiderate":{"japs":"a"}},{"id":"goy","type":"simple","categories":["a"],"considerate":{"Jewish person":"a"},"inconsiderate":{"kike":"a","goyum":"a","goy":"a","shlomo":"a"}},{"id":"spade","type":"simple","categories":["a"],"considerate":{"a Black person":"a"},"inconsiderate":{"spade":"a"}},{"id":"gyp","type":"simple","categories":["a"],"considerate":{"Nomad":"a","Traveler":"a","Roma":"a","Romani":"a"},"inconsiderate":{"gyppo":"a","gypsy":"a","Gipsy":"a","gyp":"a"},"note":"Gypsy is insensitive, use Roma or Romani. They're not Egyptian as their name suggests. (source: en.wikipedia.org/wiki/Romani_people#cite_ref-80)"},{"id":"blacklist","type":"simple","categories":["a"],"considerate":{"blocklist":"a","wronglist":"a","banlist":"a","deny list":"a"},"inconsiderate":{"blacklist":"a"},"note":"Replace racially-charged language with more accurate and inclusive words"},{"id":"whitelist","type":"simple","categories":["a"],"considerate":{"passlist":"a","alrightlist":"a","safelist":"a","allow list":"a"},"inconsiderate":{"whitelist":"a"},"note":"Replace racially-charged language with more accurate and inclusive words"},{"id":"savage","type":"simple","categories":["a"],"considerate":{"simple":"a","indigenous":"a","hunter-gatherer":"a"},"inconsiderate":{"primitive":"a","savage":"a","stone age":"a"},"note":"Avoid using terms that imply a group has not changed over time and that they are inferior"},{"id":"tribe","type":"simple","categories":["a"],"considerate":{"society":"a","community":"a"},"inconsiderate":{"tribe":"a"},"note":"Avoid using terms that make some groups sound inferior"},{"id":"sophisticated-culture","type":"simple","categories":["a"],"considerate":{"complex culture":"a"},"inconsiderate":{"sophisticated culture":"a"},"note":"Avoid using terms that make some groups sound inferior. Replace \"sophisticated\" with a neutral term such as \"complex\""},{"id":"sophisticated-technology","type":"simple","categories":["a"],"considerate":{"complex technology":"a"},"inconsiderate":{"sophisticated technology":"a"},"note":"Avoid using terms that make some groups sound inferior. Replace \"sophisticated\" with a neutral term such as \"complex\""},{"id":"make-*-great-again","type":"simple","categories":["a"],"considerate":{"improve":"a"},"inconsiderate":{"make * great again":"a","make * * great again":"a","make * * * great again":"a","make * * * * great again":"a","make * * * * * great again":"a"}},{"id":"committed-suicide","type":"simple","categories":["a"],"considerate":{"died by suicide":"a"},"inconsiderate":{"committed suicide":"a","completed suicide":"a"},"note":"Source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide, https://www.speakingofsuicide.com/2013/04/13/language/"},{"id":"commit-suicide","type":"simple","categories":["a"],"considerate":{"die by suicide":"a"},"inconsiderate":{"commit suicide":"a","complete suicide":"a","successful suicide":"a"},"note":"Committing suicide is not successful/unsuccessful, that sends the wrong message (source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide, https://www.speakingofsuicide.com/2013/04/13/language/)"},{"id":"suicide-pact","type":"simple","categories":["a"],"considerate":{"rise in suicides":"a"},"inconsiderate":{"suicide epidemic":"a","epidemic of suicides":"a","suicide pact":"a"},"note":"Using sensational words can cause copycat suicides or contagion (source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide)"},{"id":"failed-suicide","type":"simple","categories":["a"],"considerate":{"suicide attempt":"a","attempted suicide":"a"},"inconsiderate":{"failed suicide":"a","failed attempt":"a","suicide failure":"a"},"note":"Attempted suicide should not be depicted as a failure (source: https://www.speakingofsuicide.com/2013/04/13/language, https://www.afsp.org/news-events/for-the-media/reporting-on-suicide)"},{"id":"suicide-note","type":"simple","categories":["a"],"considerate":{"a note from the deceased":"a"},"inconsiderate":{"suicide note":"a"},"note":"Source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide"},{"id":"hang","type":"simple","categories":["a"],"considerate":{"the app froze":"a","the app stopped responding":"a","the app stopped responding to events":"a","the app became unresponsive":"a"},"inconsiderate":{"hang":"a","hanged":"a"},"note":"When describing the behavior of computer software, using the word “hanged” needlessly invokes the topic of death by self-harm or lynching.  Consider using the word “froze” or the phrase “stopped responding to events” or “became unresponsive” instead."}];
+module.exports = [{"id":"learning-disabled","type":"basic","categories":["a"],"considerate":{"person with learning disabilities":"a"},"inconsiderate":{"learning disabled":"a"},"note":"Refer to the person, rather than the disability, first."},{"id":"invalid","type":"basic","categories":["a"],"considerate":{"turned off":"a","has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"disabled":"a","invalid":"a"},"note":"Refer to the person, rather than the disability, first."},{"id":"birth-defect","type":"basic","categories":["a"],"considerate":{"has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"birth defect":"a"},"note":"Assumes/implies that a person with a disability is deficient or inferior to others. When possible, specify the functional ability or its restriction. (source: https://ncdj.org/style-guide/)"},{"id":"suffers-from-disabilities","type":"basic","categories":["a"],"considerate":{"has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"suffers from disabilities":"a","suffering from disabilities":"a","suffering from a disability":"a","afflicted with disabilities":"a","afflicted with a disability":"a"},"note":"Assumes that a person with a disability has a reduced quality of life. (source: https://ncdj.org/style-guide/)"},{"id":"intellectually-disabled-people","type":"basic","categories":["a"],"considerate":{"people with intellectual disabilities":"a"},"inconsiderate":{"intellectually disabled people":"a"},"note":"Refer to the person, rather than the disability, first. (source: https://ncdj.org/style-guide/)"},{"id":"intellectually-disabled","type":"basic","categories":["a"],"considerate":{"person with an intellectual disability":"a"},"inconsiderate":{"intellectually disabled":"a","has intellectual issues":"a","suffers from intellectual disabilities":"a","suffering from intellectual disabilities":"a","suffering from an intellectual disability":"a","afflicted with intellectual disabilities":"a","afflicted with a intellectual disability":"a"},"note":"Assumes that a person with an intellectual disability has a reduced quality of life. (source: https://ncdj.org/style-guide/)"},{"id":"nuts","type":"basic","categories":["a"],"considerate":{"rude":"a","malicious":"a","mean":"a","disgusting":"a","vile":"a","person with symptoms of mental illness":"a","person with mental illness":"a","person with symptoms of a mental disorder":"a","person with a mental disorder":"a"},"inconsiderate":{"batshit":"a","psycho":"a","crazy":"a","delirious":"a","insane":"a","insanity":"a","loony":"a","lunacy":"a","lunatic":"a","mentally ill":"a","psychopathology":"a","mental defective":"a","moron":"a","moronic":"a","nuts":"a","mental case":"a","mental":"a"},"note":"Describe the behavior or illness without derogatory words. (source: https://ncdj.org/style-guide/)"},{"id":"sane","type":"basic","categories":["a"],"considerate":{"correct":"a","adequate":"a","sufficient":"a","consistent":"a","valid":"a","coherent":"a","sensible":"a","reasonable":"a"},"inconsiderate":{"sane":"a"},"note":"When describing a mathematical or programmatic value, using the word “sane” needlessly invokes the topic of mental health.  Consider using a domain-specific or neutral term instead."},{"id":"sanity-check","type":"basic","categories":["a"],"considerate":{"check":"a","assertion":"a","validation":"a","smoke test":"a"},"inconsiderate":{"sanity check":"a"},"note":"When describing a mathematical or programmatic value, using the phrase “sanity check” needlessly invokes the topic of mental health.  Consider using simply “check”, or a domain-specific or neutral term, instead."},{"id":"bipolar","type":"basic","categories":["a"],"considerate":{"fluctuating":"a","person with bipolar disorder":"a"},"inconsiderate":{"bipolar":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"schizo","type":"basic","categories":["a"],"considerate":{"person with schizophrenia":"a"},"inconsiderate":{"schizophrenic":"a","schizo":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"manic","type":"basic","categories":["a"],"considerate":{"person with schizophrenia":"a"},"inconsiderate":{"suffers from schizophrenia":"a","suffering from schizophrenia":"a","afflicted with schizophrenia":"a","manic":"a"},"note":"Assumes a person with schizophrenia experiences a reduced quality of life. (source: https://ncdj.org/style-guide/)"},{"id":"handicapped-parking","type":"basic","categories":["a"],"considerate":{"accessible parking":"a"},"inconsiderate":{"handicapped parking":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"handicapped","type":"basic","categories":["a"],"considerate":{"person with a handicap":"a","accessible":"a"},"inconsiderate":{"handicapped":"a"},"note":"Refer to the person, rather than the disability, first. (source: https://ncdj.org/style-guide/)"},{"id":"amputee","type":"basic","categories":["a"],"considerate":{"person with an amputation":"a"},"inconsiderate":{"amputee":"a"},"note":"Refer to the person, rather than the condition, first. (source: https://ncdj.org/style-guide/)"},{"id":"gimp","type":"basic","categories":["a"],"considerate":{"person with a limp":"a"},"inconsiderate":{"cripple":"a","crippled":"a","gimp":"a"},"note":"Refer to the specific disability."},{"id":"mongoloid","type":"basic","categories":["a"],"considerate":{"person with Down Syndrome":"a"},"inconsiderate":{"mongoloid":"a"}},{"id":"stroke-victim","type":"basic","categories":["a"],"considerate":{"individual who has had a stroke":"a"},"inconsiderate":{"stroke victim":"a","suffering from a stroke":"a","victim of a stroke":"a"},"note":"Refer to the person, rather than the condition, first."},{"id":"multiple-sclerosis-victim","type":"basic","categories":["a"],"considerate":{"person who has multiple sclerosis":"a"},"inconsiderate":{"suffers from multiple sclerosis":"a","suffering from multiple sclerosis":"a","victim of multiple sclerosis":"a","multiple sclerosis victim":"a","afflicted with multiple sclerosis":"a"}},{"id":"suffers-from-md","type":"basic","categories":["a"],"considerate":{"person who has muscular dystrophy":"a"},"inconsiderate":{"suffers from muscular dystrophy":"a","afflicted with muscular dystrophy":"a","suffers from MD":"a","afflicted with MD":"a"},"note":"Refer to a person's condition as a state, not as an affliction. (source: https://ncdj.org/style-guide)"},{"id":"family-burden","type":"basic","categories":["a"],"considerate":{"with family support needs":"a"},"inconsiderate":{"family burden":"a"}},{"id":"asylum","type":"basic","categories":["a"],"considerate":{"psychiatric hospital":"a","mental health hospital":"a"},"inconsiderate":{"asylum":"a"}},{"id":"bedlam","type":"basic","categories":["a"],"considerate":{"chaos":"a","hectic":"a","pandemonium":"a"},"inconsiderate":{"bedlam":"a","madhouse":"a","loony bin":"a"}},{"id":"downs-syndrome","type":"basic","categories":["a"],"considerate":{"Down Syndrome":"a"},"inconsiderate":{"downs syndrome":"a"},"note":"Source: https://media.specialolympics.org/soi/files/press-kit/2014_FactSheet_Final.pdf"},{"id":"retard","type":"basic","categories":["a"],"considerate":{"silly":"a","dullard":"a","person with Down Syndrome":"a","person with developmental disabilities":"a","delay":"a","hold back":"a"},"inconsiderate":{"retard":"a","retarded":"a","short bus":"a"}},{"id":"retards","type":"basic","categories":["a"],"considerate":{"sillies":"a","dullards":"a","people with developmental disabilities":"a","people with Down’s Syndrome":"a","delays":"a","holds back":"a"},"inconsiderate":{"retards":"a"}},{"id":"psychotic","type":"basic","categories":["a"],"considerate":{"person with a psychotic condition":"a","person with psychosis":"a"},"inconsiderate":{"psychotic":"a","suffers from psychosis":"a","suffering from psychosis":"a","afflicted with psychosis":"a","victim of psychosis":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition."},{"id":"lame","type":"basic","categories":["a"],"considerate":{"boring":"a","dull":"a"},"inconsiderate":{"lame":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"aids-victim","type":"basic","categories":["a"],"considerate":{"person with AIDS":"a"},"inconsiderate":{"suffering from aids":"a","suffer from aids":"a","suffers from aids":"a","afflicted with aids":"a","victim of aids":"a","aids victim":"a"}},{"id":"wheelchair-bound","type":"basic","categories":["a"],"considerate":{"uses a wheelchair":"a"},"inconsiderate":{"confined to a wheelchair":"a","bound to a wheelchair":"a","restricted to a wheelchair":"a","wheelchair bound":"a"}},{"id":"special-olympians","type":"basic","categories":["a"],"considerate":{"athletes":"a","Special Olympics athletes":"a"},"inconsiderate":{"special olympians":"a","special olympic athletes":"a"},"note":"When possible, use the exact discipline of sport. (source: https://media.specialolympics.org/soi/files/press-kit/2014_FactSheet_Final.pdf)"},{"id":"ablebodied","type":"basic","categories":["a"],"considerate":{"non-disabled":"a"},"inconsiderate":{"ablebodied":"a"},"note":"Can imply that people with disabilities lack the ability to use their bodies well. Sometimes `typical` can be used. (source: https://ncdj.org/style-guide/)"},{"id":"addict","type":"basic","categories":["a"],"considerate":{"person with a drug addiction":"a","person recovering from a drug addiction":"a"},"inconsiderate":{"addict":"a","junkie":"a"},"note":"Addiction is a neurobiological disease. (source: https://ncdj.org/style-guide/)"},{"id":"addicts","type":"basic","categories":["a"],"considerate":{"people with a drug addiction":"a","people recovering from a drug addiction":"a"},"inconsiderate":{"addicts":"a","junkies":"a"},"note":"Addiction is a neurobiological disease. (source: https://ncdj.org/style-guide/)"},{"id":"alcoholic","type":"basic","categories":["a"],"considerate":{"someone with an alcohol problem":"a"},"inconsiderate":{"alcoholic":"a","alcohol abuser":"a"},"note":"Alcoholism is a neurobiological disease. (source: https://ncdj.org/style-guide/)"},{"id":"deafmute","type":"basic","categories":["a"],"considerate":{"deaf":"a"},"inconsiderate":{"deaf and dumb":"a","deafmute":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"senile","type":"basic","categories":["a"],"considerate":{"person with dementia":"a"},"inconsiderate":{"demented":"a","senile":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"depressed","type":"basic","categories":["a"],"considerate":{"sad":"a","blue":"a","bummed out":"a","person with seasonal affective disorder":"a","person with psychotic depression":"a","person with postpartum depression":"a"},"inconsiderate":{"depressed":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"dwarf","type":"basic","categories":["a"],"considerate":{"person with dwarfism":"a","little person":"a","little people":"a","LP":"a","person of short stature":"a"},"inconsiderate":{"vertically challenged":"a","midget":"a","small person":"a","dwarf":"a"},"note":"Source: https://ncdj.org/style-guide/,https://www.lpaonline.org/faq-#Midget"},{"id":"dyslexic","type":"basic","categories":["a"],"considerate":{"person with dyslexia":"a"},"inconsiderate":{"dyslexic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"epileptic","type":"basic","categories":["a"],"considerate":{"person with epilepsy":"a"},"inconsiderate":{"epileptic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"hearing-impaired","type":"basic","categories":["a"],"considerate":{"hard of hearing":"a","partially deaf":"a","partial hearing loss":"a","deaf":"a"},"inconsiderate":{"hearing impaired":"a","hearing impairment":"a"},"note":"When possible, ask the person what they prefer. (source: https://ncdj.org/style-guide/)"},{"id":"victim-of-polio","type":"basic","categories":["a"],"considerate":{"polio":"a","person who had polio":"a"},"inconsiderate":{"infantile paralysis":"a","suffers from polio":"a","suffering from polio":"a","suffering from a polio":"a","afflicted with polio":"a","afflicted with a polio":"a","victim of polio":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"victim-of-an-injury","type":"basic","categories":["a"],"considerate":{"sustain an injury":"a","receive an injury":"a"},"inconsiderate":{"suffer from an injury":"a","suffers from an injury":"a","suffering from an injury":"a","afflicted with an injury":"a","victim of an injury":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"victim-of-injuries","type":"basic","categories":["a"],"considerate":{"sustain injuries":"a","receive injuries":"a"},"inconsiderate":{"suffer from injuries":"a","suffers from injuries":"a","suffering from injuries":"a","afflicted with injuries":"a","victim of injuries":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"paraplegic","type":"basic","categories":["a"],"considerate":{"person with paraplegia":"a"},"inconsiderate":{"paraplegic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"quadriplegic","type":"basic","categories":["a"],"considerate":{"person with quadriplegia":"a"},"inconsiderate":{"quadriplegic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"spaz","type":"basic","categories":["a"],"considerate":{"person with cerebral palsy":"a","twitch":"a","flinch":"a","hectic":"a"},"inconsiderate":{"spaz":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"spastic","type":"basic","categories":["a"],"considerate":{"person with cerebral palsy":"a","twitch":"a","flinch":"a"},"inconsiderate":{"spastic":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"stammering","type":"basic","categories":["a"],"considerate":{"stuttering":"a","disfluency of speech":"a"},"inconsiderate":{"stammering":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"stutterer","type":"basic","categories":["a"],"considerate":{"person who stutters":"a"},"inconsiderate":{"stutterer":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"tourettes-syndrome","type":"basic","categories":["a"],"considerate":{"Tourette syndrome":"a"},"inconsiderate":{"tourettes syndrome":"a","tourettes disorder":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"rehab-center","type":"basic","categories":["a"],"considerate":{"treatment center":"a"},"inconsiderate":{"rehab center":"a","detox center":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"rehab","type":"basic","categories":["a"],"considerate":{"treatment":"a"},"inconsiderate":{"rehab":"a","detox":"a"},"note":"Source: https://ncdj.org/style-guide/"},{"id":"sociopath","type":"basic","categories":["a"],"considerate":{"person with a personality disorder":"a","person with psychopathic personality":"a"},"inconsiderate":{"sociopath":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"sociopaths","type":"basic","categories":["a"],"considerate":{"people with psychopathic personalities":"a","people with a personality disorder":"a"},"inconsiderate":{"sociopaths":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://ncdj.org/style-guide/)"},{"id":"dumb","type":"basic","categories":["a"],"considerate":{"foolish":"a","ludicrous":"a","speechless":"a","silent":"a"},"inconsiderate":{"dumb":"a"},"note":"Dumb here is used in 2 different contexts , the inability to talk or as a curse word. (source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html)"},{"id":"wacko","type":"basic","categories":["a"],"considerate":{"foolish":"a","ludicrous":"a","unintelligent":"a"},"inconsiderate":{"simpleton":"a","stupid":"a","wacko":"a","whacko":"a","low iq":"a"},"note":"Source: http://www.mmonjejr.com/2014/02/deconstructing-stupid.html"},{"id":"panic-attack","type":"basic","categories":["a"],"considerate":{"fit of terror":"a","scare":"a"},"inconsiderate":{"panic attack":"a"}},{"id":"bony","type":"basic","categories":["a"],"considerate":{"thin":"a","slim":"a"},"inconsiderate":{"anorexic":"a","bony":"a"}},{"id":"ocd","type":"basic","categories":["a"],"considerate":{"has an anxiety disorder":"a","obsessive":"a","pedantic":"a","niggly":"a","picky":"a"},"inconsiderate":{"neurotic":"a","ocd":"a","o.c.d":"a","o.c.d.":"a"},"note":"Only use terms describing mental illness when referring to a professionally diagnosed medical condition. (source: https://english.stackexchange.com/questions/247550/)"},{"id":"insomnia","type":"basic","categories":["a"],"considerate":{"restlessness":"a","sleeplessness":"a"},"inconsiderate":{"insomnia":"a"}},{"id":"insomniac","type":"basic","categories":["a"],"considerate":{"person who has insomnia":"a"},"inconsiderate":{"insomniac":"a"}},{"id":"insomniacs","type":"basic","categories":["a"],"considerate":{"people who have insomnia":"a"},"inconsiderate":{"insomniacs":"a"}},{"id":"barren","type":"basic","categories":["a"],"considerate":{"empty":"a","sterile":"a","infertile":"a"},"inconsiderate":{"barren":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"deaf-to","type":"basic","categories":["a"],"considerate":{"careless":"a","heartless":"a","indifferent":"a","insensitive":"a"},"inconsiderate":{"blind to":"a","blind eye to":"a","blinded by":"a","deaf to":"a","deaf ear to":"a","deafened by":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"cretin","type":"basic","categories":["a"],"considerate":{"creep":"a","fool":"a"},"inconsiderate":{"cretin":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"daft","type":"basic","categories":["a"],"considerate":{"absurd":"a","foolish":"a"},"inconsiderate":{"daft":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"idiot","type":"basic","categories":["a"],"considerate":{"foolish":"a","ludicrous":"a","silly":"a"},"inconsiderate":{"feebleminded":"a","feeble minded":"a","idiot":"a","imbecile":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"harelipped","type":"basic","categories":["a"],"considerate":{"person with a cleft-lip and palate":"a"},"inconsiderate":{"harelipped":"a","cleftlipped":"a"},"note":"Sometimes it's cleft lip or palate, not both. Specify when possible. (source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html)"},{"id":"harelip","type":"basic","categories":["a"],"considerate":{"cleft-lip and palate":"a"},"inconsiderate":{"harelip":"a","hare lip":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"maniac","type":"basic","categories":["a"],"considerate":{"fanatic":"a","zealot":"a","enthusiast":"a"},"inconsiderate":{"maniac":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"buckteeth","type":"basic","categories":["a"],"considerate":{"person with prominent teeth":"a","prominent teeth":"a"},"inconsiderate":{"bucktoothed":"a","buckteeth":"a"}},{"id":"special","type":"basic","categories":["a"],"considerate":{"has a disability":"a","person with a disability":"a","people with disabilities":"a"},"inconsiderate":{"challenged":"a","diffability":"a","differently abled":"a","handicapable":"a","special":"a","special needs":"a","specially abled":"a"},"note":"Euphemisms for disabilities can be infantilizing. (source: http://cdrnys.org/blog/disability-dialogue/the-disability-dialogue-4-disability-euphemisms-that-need-to-bite-the-dust/,https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html)"},{"id":"libtard","type":"basic","categories":["a"],"considerate":{"disagreeable":"a","uneducated":"a","ignorant":"a","naive":"a","inconsiderate":"a"},"inconsiderate":{"fucktard":"a","libtard":"a","contard":"a"},"note":"Source: https://www.autistichoya.com/p/ableist-words-and-terms-to-avoid.html"},{"id":"add","type":"basic","categories":["a"],"considerate":{"disorganized":"a","distracted":"a","energetic":"a","hyperactive":"a","impetuous":"a","impulsive":"a","inattentive":"a","restless":"a","unfocused":"a"},"inconsiderate":{"ADD":"a","adhd":"a","a.d.d.":"a","a.d.h.d.":"a"}},{"id":"obvious","type":"basic","categories":["a"],"inconsiderate":{"obvious":"a","obviously":"a"},"note":"Not everything is as obvious as you might think. And if it isn’t obvious to the reader, it can hurt. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"just","type":"basic","categories":["a"],"inconsiderate":{"just":"a"},"note":"Not everything is as easy as you might think. And if it isn’t easy for the reader, it can hurt. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"basically","type":"basic","categories":["a"],"inconsiderate":{"basically":"a"},"note":"It’s probably not that basic. If you’re going to explain a confusing previous sentence with a clearer next sentence, why not drop the former and only use the latter? (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"simple","type":"basic","categories":["a"],"inconsiderate":{"simple":"a","simply":"a"},"note":"It’s probably not that simple. Even if it is, you probably don’t need to specifically say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"easy","type":"basic","categories":["a"],"inconsiderate":{"easy":"a","easily":"a"},"note":"It’s probably not that easy. Even if it is, you probably don’t need to specifically say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"of-course","type":"basic","categories":["a"],"inconsiderate":{"of course":"a"},"note":"If it’s self-evident then maybe you don’t need to describe it. If it isn’t, don’t say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"clearly","type":"basic","categories":["a"],"inconsiderate":{"clearly":"a"},"note":"If it’s self-evident then maybe you don’t need to describe it. If it isn’t, don’t say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"everyone-knows","type":"basic","categories":["a"],"inconsiderate":{"everyone knows":"a"},"note":"If it’s self-evident then maybe you don’t need to describe it. If it isn’t, don’t say it. (source: https://css-tricks.com/words-avoid-educational-writing/)"},{"id":"her-him","type":"or","categories":["female","male"],"considerate":{"their":"a","theirs":"a","them":"a"},"inconsiderate":{"her":"female","hers":"female","him":"male","his":"male"},"condition":"when referring to a person"},{"id":"he-she","type":"or","apostrophe":true,"categories":["female","male"],"considerate":{"they":"a","it":"a"},"inconsiderate":{"she":"female","he":"male","she'd":"female","he'd":"male","she'll":"female","he'll":"male","she's":"female","he's":"male"}},{"id":"herself-himself","type":"or","categories":["female","male"],"considerate":{"themselves":"a","theirself":"a","self":"a"},"inconsiderate":{"herself":"female","himself":"male"}},{"id":"boy-girl","type":"or","categories":["female","male"],"considerate":{"kid":"a","child":"a","youth":"a"},"inconsiderate":{"girl":"female","boy":"male"},"condition":"when referring to a person"},{"id":"gals-men","type":"or","categories":["female","male"],"considerate":{"people":"a","persons":"a","folks":"a"},"inconsiderate":{"women":"female","girls":"female","gals":"female","ladies":"female","men":"male","guys":"male","dudes":"male","gents":"male","gentlemen":"male"}},{"id":"gal-guy","type":"or","categories":["female","male"],"considerate":{"person":"a","friend":"a","pal":"a","folk":"a","individual":"a"},"inconsiderate":{"woman":"female","gal":"female","lady":"female","babe":"female","bimbo":"female","chick":"female","guy":"male","lad":"male","fellow":"male","dude":"male","bro":"male","gentleman":"male"}},{"id":"fatherland-motherland","type":"or","categories":["female","male"],"considerate":{"native land":"a","homeland":"a"},"inconsiderate":{"motherland":"female","fatherland":"male"}},{"id":"father-tongue-mother-tongue","type":"or","categories":["female","male"],"considerate":{"native tongue":"a","native language":"a"},"inconsiderate":{"mother tongue":"female","father tongue":"male"}},{"id":"freshmen-freshwomen","type":"or","categories":["female","male"],"considerate":{"first-year students":"a","freshers":"a"},"inconsiderate":{"freshwomen":"female","freshmen":"male"}},{"id":"garbageman-garbagewoman","type":"or","categories":["female","male"],"considerate":{"garbage collector":"a","waste collector":"a","trash collector":"a"},"inconsiderate":{"garbagewoman":"female","garbageman":"male"}},{"id":"garbagemen-garbagewomen","type":"or","categories":["female","male"],"considerate":{"garbage collectors":"a","waste collectors":"a","trash collectors":"a"},"inconsiderate":{"garbagewomen":"female","garbagemen":"male"}},{"id":"chairman-chairwoman","type":"or","categories":["female","male"],"considerate":{"chair":"a","head":"a","chairperson":"a","coordinator":"a","committee head":"a","moderator":"a","presiding officer":"a"},"inconsiderate":{"chairwoman":"female","chairman":"male"}},{"id":"committee-man-committee-woman","type":"or","categories":["female","male"],"considerate":{"committee member":"a"},"inconsiderate":{"committee woman":"female","committee man":"male"}},{"id":"cowboy-cowgirl","type":"or","categories":["female","male"],"considerate":{"cowhand":"a"},"inconsiderate":{"cowgirl":"female","cowboy":"male"}},{"id":"cowboys-cowgirls","type":"or","categories":["female","male"],"considerate":{"cowhands":"a"},"inconsiderate":{"cowgirls":"female","cowboys":"male"}},{"id":"cattleman-cattlewoman","type":"or","categories":["female","male"],"considerate":{"cattle rancher":"a"},"inconsiderate":{"cattlewoman":"female","cattleman":"male"}},{"id":"cattlemen-cattlewomen","type":"or","categories":["female","male"],"considerate":{"cattle ranchers":"a"},"inconsiderate":{"cattlewomen":"female","cattlemen":"male"}},{"id":"chairmen-chairwomen","type":"or","categories":["female","male"],"considerate":{"chairs":"a","chairpersons":"a","coordinators":"a"},"inconsiderate":{"chairwomen":"female","chairmen":"male"}},{"id":"postman-postwoman","type":"or","categories":["female","male"],"considerate":{"mail carrier":"a","letter carrier":"a","postal worker":"a"},"inconsiderate":{"postwoman":"female","mailwoman":"female","postman":"male","mailman":"male"}},{"id":"postmen-postwomen","type":"or","categories":["female","male"],"considerate":{"mail carriers":"a","letter carriers":"a","postal workers":"a"},"inconsiderate":{"postwomen":"female","mailwomen":"female","postmen":"male","mailmen":"male"}},{"id":"chick-cop-policeman","type":"or","categories":["female","male"],"considerate":{"officer":"a","police officer":"a"},"inconsiderate":{"policewoman":"female","policeman":"male","chick cop":"female"}},{"id":"policemen-policewomen","type":"or","categories":["female","male"],"considerate":{"officers":"a","police officers":"a"},"inconsiderate":{"policewomen":"female","policemen":"male"}},{"id":"steward-stewardess","type":"or","categories":["female","male"],"considerate":{"flight attendant":"a"},"inconsiderate":{"stewardess":"female","steward":"male"}},{"id":"stewardesses-stewards","type":"or","categories":["female","male"],"considerate":{"flight attendants":"a"},"inconsiderate":{"stewardesses":"female","stewards":"male"}},{"id":"congressman-congresswoman","type":"or","categories":["female","male"],"considerate":{"member of congress":"a","congress person":"a","legislator":"a","representative":"a"},"inconsiderate":{"congresswoman":"female","congressman":"male"}},{"id":"congressmen-congresswomen","type":"or","categories":["female","male"],"considerate":{"members of congress":"a","congress persons":"a","legislators":"a","representatives":"a"},"inconsiderate":{"congresswomen":"female","congressmen":"male"}},{"id":"fireman-firewoman","type":"or","categories":["female","male"],"considerate":{"fire fighter":"a","fire officer":"a"},"inconsiderate":{"firewoman":"female","fireman":"male"}},{"id":"firemen-firewomen","type":"or","categories":["female","male"],"considerate":{"fire fighters":"a"},"inconsiderate":{"firewomen":"female","firemen":"male"}},{"id":"fisherman-fisherwoman","type":"or","categories":["female","male"],"considerate":{"fisher":"a","crew member":"a","fisherfolk":"a","angler":"a"},"inconsiderate":{"fisherwoman":"female","fisherman":"male"}},{"id":"fishermen-fisherwomen","type":"or","categories":["female","male"],"considerate":{"fishers":"a"},"inconsiderate":{"fisherwomen":"female","fishermen":"male"}},{"id":"brotherhood-sisterhood","type":"or","categories":["female","male"],"considerate":{"kinship":"a","community":"a"},"inconsiderate":{"sisterhood":"female","brotherhood":"male"}},{"id":"common-girl-common-man","type":"or","categories":["female","male"],"considerate":{"common person":"a","average person":"a"},"inconsiderate":{"common girl":"female","common man":"male"}},{"id":"salaryman-salarywoman","type":"or","categories":["female","male"],"considerate":{"business executive":"a","entrepreneur":"a","business person":"a","professional":"a"},"inconsiderate":{"businesswoman":"female","salarywoman":"female","businessman":"male","salaryman":"male"}},{"id":"salarymen-salarywomen","type":"or","categories":["female","male"],"considerate":{"business executives":"a","entrepreneurs":"a"},"inconsiderate":{"businesswomen":"female","salarywomen":"female","career girl":"female","career woman":"female","businessmen":"male","salarymen":"male"}},{"id":"janitor-janitress","type":"or","categories":["female","male"],"considerate":{"cleaner":"a"},"inconsiderate":{"cleaning lady":"female","cleaning girl":"female","cleaning woman":"female","janitress":"female","cleaning man":"male","cleaning boy":"male","janitor":"male"}},{"id":"janitors-janitresses","type":"or","categories":["female","male"],"considerate":{"cleaners":"a","housekeeping":"a"},"inconsiderate":{"cleaning ladies":"female","cleaning girls":"female","janitresses":"female","cleaning men":"male","janitors":"male"}},{"id":"delivery-boy-delivery-girl","type":"or","categories":["female","male"],"considerate":{"courier":"a","messenger":"a"},"inconsiderate":{"delivery girl":"female","delivery boy":"male"}},{"id":"foreman-forewoman","type":"or","categories":["female","male"],"considerate":{"supervisor":"a","shift boss":"a"},"inconsiderate":{"forewoman":"female","foreman":"male"}},{"id":"frontman,-front-man-frontwoman,-front-woman","type":"or","categories":["female","male"],"considerate":{"lead":"a","front":"a","figurehead":"a"},"inconsiderate":{"frontwoman, front woman":"female","frontman, front man":"male"}},{"id":"front-men,-frontmen-front-women,-frontwomen","type":"or","categories":["female","male"],"considerate":{"figureheads":"a"},"inconsiderate":{"front women, frontwomen":"female","front men, frontmen":"male"}},{"id":"foremen-forewomen","type":"or","categories":["female","male"],"considerate":{"supervisors":"a","shift bosses":"a"},"inconsiderate":{"forewomen":"female","foremen":"male"}},{"id":"insurance-man-insurance-woman","type":"or","categories":["female","male"],"considerate":{"insurance agent":"a"},"inconsiderate":{"insurance woman":"female","insurance man":"male"}},{"id":"insurance-men-insurance-women","type":"or","categories":["female","male"],"considerate":{"insurance agents":"a"},"inconsiderate":{"insurance women":"female","insurance men":"male"}},{"id":"landlady-landlord","type":"or","categories":["female","male"],"considerate":{"proprietor":"a","building manager":"a"},"inconsiderate":{"landlady":"female","landlord":"male"}},{"id":"landladies-landlords","type":"or","categories":["female","male"],"considerate":{"proprietors":"a","building managers":"a"},"inconsiderate":{"landladies":"female","landlords":"male"}},{"id":"alumna-alumnus","type":"or","categories":["female","male"],"considerate":{"graduate":"a"},"inconsiderate":{"alumna":"female","alumnus":"male"}},{"id":"alumnae-alumni","type":"or","categories":["female","male"],"considerate":{"graduates":"a"},"inconsiderate":{"alumnae":"female","alumni":"male"}},{"id":"newsman-newswoman","type":"or","categories":["female","male"],"considerate":{"anchor":"a","journalist":"a"},"inconsiderate":{"newswoman":"female","newspaperwoman":"female","anchorwoman":"female","newsman":"male","newspaperman":"male","anchorman":"male"}},{"id":"newsmen-newswomen","type":"or","categories":["female","male"],"considerate":{"anchors":"a","journalists":"a"},"inconsiderate":{"newswomen":"female","newspaperwomen":"female","anchorwomen":"female","newsmen":"male","newspapermen":"male","anchormen":"male"}},{"id":"repairman-repairwoman","type":"or","categories":["female","male"],"considerate":{"repairer":"a","technician":"a"},"inconsiderate":{"repairwoman":"female","repairman":"male"}},{"id":"repairmen-repairwomen","type":"or","categories":["female","male"],"considerate":{"technicians":"a"},"inconsiderate":{"repairwomen":"female","repairmen":"male"}},{"id":"saleslady-salesman","type":"or","categories":["female","male"],"considerate":{"salesperson":"a","sales clerk":"a","sales rep":"a","sales agent":"a","sales attendant":"a","seller":"a","shop assistant":"a"},"inconsiderate":{"saleswoman":"female","sales woman":"female","saleslady":"female","salesman":"male","sales man":"male"}},{"id":"salesmen-saleswomen","type":"or","categories":["female","male"],"considerate":{"sales clerks":"a","sales reps":"a","sales agents":"a","sellers":"a"},"inconsiderate":{"saleswomen":"female","sales women":"female","salesladies":"female","salesmen":"male","sales men":"male"}},{"id":"serviceman-servicewoman","type":"or","categories":["female","male"],"considerate":{"soldier":"a","service representative":"a"},"inconsiderate":{"servicewoman":"female","serviceman":"male"}},{"id":"servicemen-servicewomen","type":"or","categories":["female","male"],"considerate":{"soldiers":"a","service representatives":"a"},"inconsiderate":{"servicewomen":"female","servicemen":"male"}},{"id":"waiter-waitress","type":"or","categories":["female","male"],"considerate":{"server":"a"},"inconsiderate":{"waitress":"female","waiter":"male"}},{"id":"waiters-waitresses","type":"or","categories":["female","male"],"considerate":{"servers":"a"},"inconsiderate":{"waitresses":"female","waiters":"male"}},{"id":"workman-workwoman","type":"or","categories":["female","male"],"considerate":{"worker":"a","wage earner":"a","taxpayer":"a"},"inconsiderate":{"workwoman":"female","working woman":"female","workman":"male","working man":"male"}},{"id":"workmen-workwomen","type":"or","categories":["female","male"],"considerate":{"workers":"a"},"inconsiderate":{"workwomen":"female","workmen":"male"}},{"id":"actor-actress","type":"or","categories":["female","male"],"considerate":{"performer":"a","star":"a","artist":"a","entertainer":"a"},"inconsiderate":{"actress":"female","actor":"male"}},{"id":"actors-actresses","type":"or","categories":["female","male"],"considerate":{"performers":"a","stars":"a","artists":"a","entertainers":"a"},"inconsiderate":{"actresses":"female","actors":"male"}},{"id":"aircrewwoman-airman","type":"or","categories":["female","male"],"considerate":{"pilot":"a","aviator":"a","airstaff":"a"},"inconsiderate":{"aircrewwoman":"female","aircrew woman":"female","aircrewman":"male","airman":"male"}},{"id":"aircrewwomen-airmen","type":"or","categories":["female","male"],"considerate":{"pilots":"a","aviators":"a","airstaff":"a"},"inconsiderate":{"aircrewwomen":"female","aircrew women":"female","aircrewmen":"male","airmen":"male"}},{"id":"alderman-alderwoman","type":"or","categories":["female","male"],"considerate":{"cabinet member":"a"},"inconsiderate":{"alderwoman":"female","alderman":"male"}},{"id":"aldermen-alderwomen","type":"or","categories":["female","male"],"considerate":{"cabinet":"a","cabinet members":"a","alderperson":"a"},"inconsiderate":{"alderwomen":"female","aldermen":"male"}},{"id":"assemblyman-assemblywoman","type":"or","categories":["female","male"],"considerate":{"assembly person":"a","assembly worker":"a"},"inconsiderate":{"assemblywoman":"female","assemblyman":"male"}},{"id":"aunt-uncle","type":"or","categories":["female","male"],"considerate":{"relative":"a"},"inconsiderate":{"kinswoman":"female","aunt":"female","kinsman":"male","uncle":"male"}},{"id":"aunts-uncles","type":"or","categories":["female","male"],"considerate":{"relatives":"a"},"inconsiderate":{"kinswomen":"female","aunts":"female","kinsmen":"male","uncles":"male"}},{"id":"boogeyman-boogeywoman","type":"or","categories":["female","male"],"considerate":{"boogeymonster":"a"},"inconsiderate":{"boogeywoman":"female","boogeyman":"male"}},{"id":"boogieman-boogiewoman","type":"or","categories":["female","male"],"considerate":{"boogeymonster":"a"},"inconsiderate":{"boogiewoman":"female","boogieman":"male"}},{"id":"bogeyman-bogeywoman","type":"or","categories":["female","male"],"considerate":{"bogeymonster":"a"},"inconsiderate":{"bogeywoman":"female","bogeyman":"male"}},{"id":"bogieman-bogiewoman","type":"or","categories":["female","male"],"considerate":{"bogeymonster":"a"},"inconsiderate":{"bogiewoman":"female","bogieman":"male"}},{"id":"boogiemen-boogiewomen","type":"or","categories":["female","male"],"considerate":{"boogeymonsters":"a"},"inconsiderate":{"boogiewomen":"female","boogiemen":"male"}},{"id":"bogiemen-bogiewomen","type":"or","categories":["female","male"],"considerate":{"bogeymonsters":"a"},"inconsiderate":{"bogiewomen":"female","bogiemen":"male"}},{"id":"bondsman-bondswoman","type":"or","categories":["female","male"],"considerate":{"bonder":"a"},"inconsiderate":{"bondswoman":"female","bondsman":"male"}},{"id":"bondsmen-bondswomen","type":"or","categories":["female","male"],"considerate":{"bonders":"a"},"inconsiderate":{"bondswomen":"female","bondsmen":"male"}},{"id":"husband-wife","type":"or","categories":["female","male"],"considerate":{"partner":"a","significant other":"a","spouse":"a"},"inconsiderate":{"wife":"female","husband":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"husbands-wives","type":"or","categories":["female","male"],"considerate":{"partners":"a","significant others":"a","spouses":"a"},"inconsiderate":{"wives":"female","husbands":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"boyfriend-girlfriend","type":"or","categories":["female","male"],"considerate":{"partner":"a","friend":"a","significant other":"a"},"inconsiderate":{"girlfriend":"female","boyfriend":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"boyfriends-girlfriends","type":"or","categories":["female","male"],"considerate":{"partners":"a","friends":"a","significant others":"a"},"inconsiderate":{"girlfriends":"female","boyfriends":"male"},"note":"Source: https://www.bustle.com/articles/108321-6-reasons-to-refer-to-your-significant-other-as-your-partner"},{"id":"boyhood-girlhood","type":"or","categories":["female","male"],"considerate":{"childhood":"a"},"inconsiderate":{"girlhood":"female","boyhood":"male"}},{"id":"boyish-girly","type":"or","categories":["female","male"],"considerate":{"childish":"a"},"inconsiderate":{"girly":"female","girlish":"female","boyish":"male"}},{"id":"journeyman-journeywoman","type":"or","categories":["female","male"],"considerate":{"journeyperson":"a"},"inconsiderate":{"journeywoman":"female","journeyman":"male"}},{"id":"journeymen-journeywomen","type":"or","categories":["female","male"],"considerate":{"journeypersons":"a"},"inconsiderate":{"journeywomen":"female","journeymen":"male"}},{"id":"godfather-godmother","type":"or","categories":["female","male"],"considerate":{"godparent":"a","elder":"a","patron":"a"},"inconsiderate":{"godmother":"female","patroness":"female","godfather":"male"}},{"id":"granddaughter-grandson","type":"or","categories":["female","male"],"considerate":{"grandchild":"a"},"inconsiderate":{"granddaughter":"female","grandson":"male"}},{"id":"granddaughters-grandsons","type":"or","categories":["female","male"],"considerate":{"grandchildren":"a"},"inconsiderate":{"granddaughters":"female","grandsons":"male"}},{"id":"forefather-foremother","type":"or","categories":["female","male"],"considerate":{"ancestor":"a"},"inconsiderate":{"foremother":"female","forefather":"male"}},{"id":"forefathers-foremothers","type":"or","categories":["female","male"],"considerate":{"ancestors":"a"},"inconsiderate":{"foremothers":"female","forefathers":"male"}},{"id":"gramps-granny","type":"or","categories":["female","male"],"considerate":{"grandparent":"a","ancestor":"a"},"inconsiderate":{"granny":"female","grandma":"female","grandmother":"female","grandpappy":"male","granddaddy":"male","gramps":"male","grandpa":"male","grandfather":"male"}},{"id":"grandfathers-grandmothers","type":"or","categories":["female","male"],"considerate":{"grandparents":"a","ancestors":"a"},"inconsiderate":{"grandmothers":"female","grandfathers":"male"}},{"id":"bride-groom","type":"or","categories":["female","male"],"considerate":{"spouse":"a","newlywed":"a"},"inconsiderate":{"bride":"female","groom":"male"}},{"id":"brother-sister","type":"or","categories":["female","male"],"considerate":{"sibling":"a"},"inconsiderate":{"sister":"female","brother":"male"}},{"id":"brothers-sisters","type":"or","categories":["female","male"],"considerate":{"siblings":"a"},"inconsiderate":{"sisters":"female","brothers":"male"}},{"id":"cameraman-camerawoman","type":"or","categories":["female","male"],"considerate":{"camera operator":"a","camera person":"a"},"inconsiderate":{"camerawoman":"female","cameraman":"male"}},{"id":"cameramen-camerawomen","type":"or","categories":["female","male"],"considerate":{"camera operators":"a"},"inconsiderate":{"camerawomen":"female","cameramen":"male"}},{"id":"caveman-cavewoman","type":"or","categories":["female","male"],"considerate":{"troglodyte":"a","hominidae":"a"},"inconsiderate":{"cavewoman":"female","caveman":"male"}},{"id":"cavemen-cavewomen","type":"or","categories":["female","male"],"considerate":{"troglodytae":"a","troglodyti":"a","troglodytes":"a","hominids":"a"},"inconsiderate":{"cavewomen":"female","cavemen":"male"}},{"id":"clergyman-clergywoman","type":"or","categories":["female","male"],"considerate":{"clergyperson":"a","clergy":"a","cleric":"a"},"inconsiderate":{"clergywoman":"female","clergyman":"male"}},{"id":"clergymen-clergywomen","type":"or","categories":["female","male"],"considerate":{"clergies":"a","clerics":"a"},"inconsiderate":{"clergywomen":"female","clergymen":"male"}},{"id":"councilman-councilwoman","type":"or","categories":["female","male"],"considerate":{"council member":"a"},"inconsiderate":{"councilwoman":"female","councilman":"male"}},{"id":"councilmen-councilwomen","type":"or","categories":["female","male"],"considerate":{"council members":"a"},"inconsiderate":{"councilwomen":"female","councilmen":"male"}},{"id":"countryman-countrywoman","type":"or","categories":["female","male"],"considerate":{"country person":"a"},"inconsiderate":{"countrywoman":"female","countryman":"male"}},{"id":"countrymen-countrywomen","type":"or","categories":["female","male"],"considerate":{"country folk":"a"},"inconsiderate":{"countrywomen":"female","countrymen":"male"}},{"id":"handyman-handywoman","type":"or","categories":["female","male"],"considerate":{"artisan":"a","craftsperson":"a","skilled worker":"a"},"inconsiderate":{"handywoman":"female","craftswoman":"female","handyman":"male","craftsman":"male"}},{"id":"host-hostess","type":"or","categories":["female","male"],"considerate":{"presenter":"a","entertainer":"a","emcee":"a"},"inconsiderate":{"hostess":"female","host":"male"}},{"id":"hostesses-hosts","type":"or","categories":["female","male"],"considerate":{"presenters":"a","entertainers":"a","emcees":"a"},"inconsiderate":{"hostesses":"female","hosts":"male"}},{"id":"handymen-handywomen","type":"or","categories":["female","male"],"considerate":{"artisans":"a","craftspersons":"a","skilled workers":"a"},"inconsiderate":{"handywomen":"female","craftswomen":"female","handymen":"male","craftsmen":"male"}},{"id":"hangman-hangwoman","type":"or","categories":["female","male"],"considerate":{"guillotine":"a"},"inconsiderate":{"hangwoman":"female","hangman":"male"}},{"id":"hangmen-hangwomen","type":"or","categories":["female","male"],"considerate":{"guillotines":"a"},"inconsiderate":{"hangwomen":"female","hangmen":"male"}},{"id":"henchman-henchwoman","type":"or","categories":["female","male"],"considerate":{"sidekick":"a"},"inconsiderate":{"henchwoman":"female","henchman":"male"}},{"id":"henchmen-henchwomen","type":"or","categories":["female","male"],"considerate":{"sidekicks":"a"},"inconsiderate":{"henchwomen":"female","henchmen":"male"}},{"id":"hero-heroine","type":"or","categories":["female","male"],"considerate":{"role-model":"a","mentor":"a"},"inconsiderate":{"heroine":"female","hero":"male"}},{"id":"heroes-heroines","type":"or","categories":["female","male"],"considerate":{"role-models":"a","mentor":"a"},"inconsiderate":{"heroines":"female","heroes":"male"}},{"id":"maternal-paternal","type":"or","categories":["female","male"],"considerate":{"parental":"a","warm":"a","intimate":"a"},"inconsiderate":{"maternal":"female","paternal":"male","fraternal":"male"}},{"id":"maternity-paternity","type":"or","categories":["female","male"],"considerate":{"parental":"a"},"inconsiderate":{"maternity":"female","paternity":"male"}},{"id":"dads-moms","type":"or","categories":["female","male"],"considerate":{"parents":"a"},"inconsiderate":{"mamas":"female","mothers":"female","moms":"female","mums":"female","mommas":"female","mommies":"female","papas":"male","fathers":"male","dads":"male","daddies":"male"}},{"id":"dad-mom","type":"or","categories":["female","male"],"considerate":{"parent":"a"},"inconsiderate":{"mama":"female","mother":"female","mom":"female","mum":"female","momma":"female","mommy":"female","papa":"male","father":"male","dad":"male","pop":"male","daddy":"male"}},{"id":"daughter-son","type":"or","categories":["female","male"],"considerate":{"child":"a"},"inconsiderate":{"daughter":"female","son":"male"}},{"id":"daughters-sons","type":"or","categories":["female","male"],"considerate":{"children":"a"},"inconsiderate":{"daughters":"female","sons":"male"}},{"id":"doorman-doorwoman","type":"or","categories":["female","male"],"considerate":{"concierge":"a"},"inconsiderate":{"doorwoman":"female","doorman":"male"}},{"id":"doormen-doorwomen","type":"or","categories":["female","male"],"considerate":{"concierges":"a"},"inconsiderate":{"doorwomen":"female","doormen":"male"}},{"id":"feminin-manly","type":"or","categories":["female","male"],"considerate":{"humanly":"a","mature":"a"},"inconsiderate":{"feminin":"female","dudely":"male","manly":"male"}},{"id":"females-males","type":"or","categories":["female","male"],"considerate":{"humans":"a"},"inconsiderate":{"females":"female","males":"male"}},{"id":"king-queen","type":"or","categories":["female","male"],"considerate":{"ruler":"a"},"inconsiderate":{"empress":"female","queen":"female","emperor":"male","king":"male"}},{"id":"kings-queens","type":"or","categories":["female","male"],"considerate":{"rulers":"a"},"inconsiderate":{"empresses":"female","queens":"female","emperors":"male","kings":"male"}},{"id":"kingsize-queensize","type":"or","categories":["female","male"],"considerate":{"jumbo":"a","gigantic":"a"},"inconsiderate":{"queensize":"female","kingsize":"male"}},{"id":"kingmaker-queenmaker","type":"or","categories":["female","male"],"considerate":{"power behind the throne":"a"},"inconsiderate":{"queenmaker":"female","kingmaker":"male"}},{"id":"layman-laywoman","type":"or","categories":["female","male"],"considerate":{"civilian":"a"},"inconsiderate":{"laywoman":"female","layman":"male"}},{"id":"laymen-laywomen","type":"or","categories":["female","male"],"considerate":{"civilians":"a"},"inconsiderate":{"laywomen":"female","laymen":"male"}},{"id":"dame-lord","type":"or","categories":["female","male"],"considerate":{"official":"a","owner":"a","expert":"a","superior":"a","chief":"a","ruler":"a"},"inconsiderate":{"dame":"female","lord":"male"}},{"id":"dames-lords","type":"or","categories":["female","male"],"considerate":{"officials":"a","chiefs":"a","rulers":"a"},"inconsiderate":{"dames":"female","lords":"male"}},{"id":"manhood-womanhood","type":"or","categories":["female","male"],"considerate":{"adulthood":"a","personhood":"a","maturity":"a"},"inconsiderate":{"womanhood":"female","masculinity":"male","manhood":"male"}},{"id":"femininity-manliness","type":"or","categories":["female","male"],"considerate":{"humanity":"a"},"inconsiderate":{"femininity":"female","manliness":"male"}},{"id":"marksman-markswoman","type":"or","categories":["female","male"],"considerate":{"shooter":"a"},"inconsiderate":{"markswoman":"female","marksman":"male"}},{"id":"marksmen-markswomen","type":"or","categories":["female","male"],"considerate":{"shooters":"a"},"inconsiderate":{"markswomen":"female","marksmen":"male"}},{"id":"middleman-middlewoman","type":"or","categories":["female","male"],"considerate":{"intermediary":"a","go-between":"a"},"inconsiderate":{"middlewoman":"female","middleman":"male"}},{"id":"middlemen-middlewomen","type":"or","categories":["female","male"],"considerate":{"intermediaries":"a","go-betweens":"a"},"inconsiderate":{"middlewomen":"female","middlemen":"male"}},{"id":"milkman-milkwoman","type":"or","categories":["female","male"],"considerate":{"milk person":"a"},"inconsiderate":{"milkwoman":"female","milkman":"male"}},{"id":"milkmen-milkwomen","type":"or","categories":["female","male"],"considerate":{"milk people":"a"},"inconsiderate":{"milkwomen":"female","milkmen":"male"}},{"id":"nephew-niece","type":"or","categories":["female","male"],"considerate":{"nibling":"a","sibling’s child":"a"},"inconsiderate":{"niece":"female","nephew":"male"}},{"id":"nephews-nieces","type":"or","categories":["female","male"],"considerate":{"niblings":"a","sibling’s children":"a"},"inconsiderate":{"nieces":"female","nephews":"male"}},{"id":"nobleman-noblewoman","type":"or","categories":["female","male"],"considerate":{"noble":"a"},"inconsiderate":{"noblewoman":"female","nobleman":"male"}},{"id":"noblemen-noblewomen","type":"or","categories":["female","male"],"considerate":{"nobles":"a"},"inconsiderate":{"noblewomen":"female","noblemen":"male"}},{"id":"ombudsman-ombudswoman","type":"or","categories":["female","male"],"considerate":{"notary":"a","consumer advocate":"a","trouble shooter":"a","omsbudperson":"a","mediator":"a"},"inconsiderate":{"ombudswoman":"female","ombudsman":"male"}},{"id":"ombudsmen-ombudswomen","type":"or","categories":["female","male"],"considerate":{"notaries":"a","omsbudpersons":"a","omsbudpeople":"a","mediators":"a"},"inconsiderate":{"ombudswomen":"female","ombudsmen":"male"}},{"id":"prince-princess","type":"or","categories":["female","male"],"considerate":{"heir":"a"},"inconsiderate":{"princess":"female","prince":"male"}},{"id":"princes-princesses","type":"or","categories":["female","male"],"considerate":{"heirs":"a"},"inconsiderate":{"princesses":"female","princes":"male"}},{"id":"sandman-sandwoman","type":"or","categories":["female","male"],"considerate":{"fairy":"a"},"inconsiderate":{"sandwoman":"female","sandman":"male"}},{"id":"sandmen-sandwomen","type":"or","categories":["female","male"],"considerate":{"fairies":"a"},"inconsiderate":{"sandwomen":"female","sandmen":"male"}},{"id":"showman-showwoman","type":"or","categories":["female","male"],"considerate":{"promoter":"a"},"inconsiderate":{"showwoman":"female","showman":"male"}},{"id":"showmen-showwomen","type":"or","categories":["female","male"],"considerate":{"promoters":"a"},"inconsiderate":{"showwomen":"female","show women":"female","showmen":"male"}},{"id":"spaceman-spacewoman","type":"or","categories":["female","male"],"considerate":{"astronaut":"a"},"inconsiderate":{"spacewoman":"female","spaceman":"male"}},{"id":"spacemen-spacewomen","type":"or","categories":["female","male"],"considerate":{"astronauts":"a"},"inconsiderate":{"spacewomen":"female","spacemen":"male"}},{"id":"spokesman-spokeswoman","type":"or","categories":["female","male"],"considerate":{"speaker":"a","spokesperson":"a","representative":"a"},"inconsiderate":{"spokeswoman":"female","spokesman":"male"}},{"id":"spokesmen-spokeswomen","type":"or","categories":["female","male"],"considerate":{"speakers":"a","spokespersons":"a"},"inconsiderate":{"spokeswomen":"female","spokesmen":"male"}},{"id":"sportsman-sportswoman","type":"or","categories":["female","male"],"considerate":{"athlete":"a","sports person":"a"},"inconsiderate":{"sportswoman":"female","sportsman":"male"}},{"id":"sportsmen-sportswomen","type":"or","categories":["female","male"],"considerate":{"athletes":"a","sports persons":"a"},"inconsiderate":{"sportswomen":"female","sportsmen":"male"}},{"id":"statesman-stateswoman","type":"or","categories":["female","male"],"considerate":{"senator":"a"},"inconsiderate":{"stateswoman":"female","statesman":"male"}},{"id":"stepbrother-stepsister","type":"or","categories":["female","male"],"considerate":{"step-sibling":"a"},"inconsiderate":{"stepsister":"female","stepbrother":"male"}},{"id":"stepbrothers-stepsisters","type":"or","categories":["female","male"],"considerate":{"step-siblings":"a"},"inconsiderate":{"stepsisters":"female","stepbrothers":"male"}},{"id":"stepdad-stepmom","type":"or","categories":["female","male"],"considerate":{"step-parent":"a"},"inconsiderate":{"stepmom":"female","stepmother":"female","stepdad":"male","stepfather":"male"}},{"id":"stepfathers-stepmothers","type":"or","categories":["female","male"],"considerate":{"step-parents":"a"},"inconsiderate":{"stepmothers":"female","stepfathers":"male"}},{"id":"superman-superwoman","type":"or","categories":["female","male"],"considerate":{"titan":"a"},"inconsiderate":{"superwoman":"female","superman":"male"}},{"id":"supermen-superwomen","type":"or","categories":["female","male"],"considerate":{"titans":"a"},"inconsiderate":{"superwomen":"female","supermen":"male"}},{"id":"unmanly-unwomanly","type":"or","categories":["female","male"],"considerate":{"inhumane":"a"},"inconsiderate":{"unwomanly":"female","unwomenly":"female","unmanly":"male","unmenly":"male"}},{"id":"watchman-watchwoman","type":"or","categories":["female","male"],"considerate":{"watcher":"a"},"inconsiderate":{"watchwoman":"female","watchman":"male"}},{"id":"watchmen-watchwomen","type":"or","categories":["female","male"],"considerate":{"watchers":"a"},"inconsiderate":{"watchwomen":"female","watchmen":"male"}},{"id":"weatherman-weatherwoman","type":"or","categories":["female","male"],"considerate":{"weather forecaster":"a","meteorologist":"a"},"inconsiderate":{"weatherwoman":"female","weatherman":"male"}},{"id":"weathermen-weatherwomen","type":"or","categories":["female","male"],"considerate":{"weather forecasters":"a","meteorologists":"a"},"inconsiderate":{"weatherwomen":"female","weathermen":"male"}},{"id":"widow-widower","type":"or","categories":["female","male"],"considerate":{"bereaved":"a"},"inconsiderate":{"widow":"female","widows":"female","widower":"male","widowers":"male"}},{"id":"own-man-own-woman","type":"or","categories":["female","male"],"considerate":{"own person":"a"},"inconsiderate":{"own woman":"female","own man":"male"}},{"id":"frenchmen","type":"basic","categories":["male"],"considerate":{"french":"a","the french":"a"},"inconsiderate":{"frenchmen":"male"}},{"id":"ladylike","type":"basic","categories":["female"],"considerate":{"courteous":"a","cultured":"a"},"inconsiderate":{"ladylike":"female"}},{"id":"like-a-man","type":"basic","categories":["male"],"considerate":{"resolutely":"a","bravely":"a"},"inconsiderate":{"like a man":"male"}},{"id":"maiden-name","type":"basic","categories":["female"],"considerate":{"birth name":"a"},"inconsiderate":{"maiden name":"female"}},{"id":"maiden-voyage","type":"basic","categories":["female"],"considerate":{"first voyage":"a"},"inconsiderate":{"maiden voyage":"female"}},{"id":"man-enough","type":"basic","categories":["male"],"considerate":{"strong enough":"a"},"inconsiderate":{"man enough":"male"}},{"id":"oneupmanship","type":"basic","categories":["male"],"considerate":{"upstaging":"a","competitiveness":"a"},"inconsiderate":{"oneupmanship":"male"}},{"id":"mrs-","type":"basic","categories":["female"],"considerate":{"ms.":"a"},"inconsiderate":{"miss.":"female","mrs.":"female"}},{"id":"manmade","type":"basic","categories":["male"],"considerate":{"manufactured":"a","artificial":"a","synthetic":"a","machine-made":"a","constructed":"a"},"inconsiderate":{"manmade":"male"}},{"id":"man-of-action","type":"basic","categories":["male"],"considerate":{"dynamo":"a"},"inconsiderate":{"man of action":"male"}},{"id":"man-of-letters","type":"basic","categories":["male"],"considerate":{"scholar":"a","writer":"a","literary figure":"a"},"inconsiderate":{"man of letters":"male"}},{"id":"man-of-the-world","type":"basic","categories":["male"],"considerate":{"sophisticate":"a"},"inconsiderate":{"man of the world":"male"}},{"id":"fellowship","type":"basic","categories":["male"],"considerate":{"camaraderie":"a","community":"a","organization":"a"},"inconsiderate":{"fellowship":"male"}},{"id":"freshman","type":"basic","categories":["male"],"considerate":{"first-year student":"a","fresher":"a"},"inconsiderate":{"freshman":"male","freshwoman":"male"}},{"id":"workmanship","type":"basic","categories":["male"],"considerate":{"quality construction":"a","expertise":"a"},"inconsiderate":{"workmanship":"male"}},{"id":"housewife","type":"basic","categories":["female"],"considerate":{"homemaker":"a","homeworker":"a"},"inconsiderate":{"housewife":"female"}},{"id":"housewives","type":"basic","categories":["female"],"considerate":{"homemakers":"a","homeworkers":"a"},"inconsiderate":{"housewives":"female"}},{"id":"motherly","type":"basic","categories":["female"],"considerate":{"loving":"a","warm":"a","nurturing":"a"},"inconsiderate":{"motherly":"female"}},{"id":"manpower","type":"basic","categories":["male"],"considerate":{"human resources":"a","workforce":"a","personnel":"a","staff":"a","labor":"a","labor force":"a","staffing":"a","combat personnel":"a"},"inconsiderate":{"manpower":"male"}},{"id":"master-of-ceremonies","type":"basic","categories":["male"],"considerate":{"emcee":"a","moderator":"a","convenor":"a"},"inconsiderate":{"master of ceremonies":"male"}},{"id":"masterful","type":"basic","categories":["male"],"considerate":{"skilled":"a","authoritative":"a","commanding":"a"},"inconsiderate":{"masterful":"male"}},{"id":"mastermind","type":"basic","categories":["male"],"considerate":{"genius":"a","creator":"a","instigator":"a","oversee":"a","launch":"a","originate":"a"},"inconsiderate":{"mastermind":"male"}},{"id":"masterpiece","type":"basic","categories":["male"],"considerate":{"work of genius":"a","chef d’oeuvre":"a"},"inconsiderate":{"masterpiece":"male"}},{"id":"masterplan","type":"basic","categories":["male"],"considerate":{"vision":"a","comprehensive plan":"a"},"inconsiderate":{"masterplan":"male"}},{"id":"masterstroke","type":"basic","categories":["male"],"considerate":{"trump card":"a","stroke of genius":"a"},"inconsiderate":{"masterstroke":"male"}},{"id":"madman","type":"basic","categories":["male"],"considerate":{"fanatic":"a","zealot":"a","enthusiast":"a"},"inconsiderate":{"madman":"male","mad man":"male"}},{"id":"madmen","type":"basic","categories":["male"],"considerate":{"fanatics":"a","zealots":"a","enthusiasts":"a"},"inconsiderate":{"madmen":"male","mad men":"male"}},{"id":"mankind","type":"basic","categories":["male"],"considerate":{"humankind":"a"},"inconsiderate":{"mankind":"male"}},{"id":"manhour","type":"basic","categories":["male"],"considerate":{"staff hour":"a","hour of work":"a"},"inconsiderate":{"manhour":"male","man hour":"male"}},{"id":"manhours","type":"basic","categories":["male"],"considerate":{"staff hours":"a","hours of work":"a","hours of labor":"a","hours":"a"},"inconsiderate":{"manhours":"male","man hours":"male"}},{"id":"manned","type":"basic","categories":["a"],"considerate":{"staffed":"a","crewed":"a","piloted":"a"},"inconsiderate":{"manned":"a"},"note":"Using gender neutral language means users will help to break up gender stereotypes."},{"id":"unmanned","type":"basic","categories":["a"],"considerate":{"robotic":"a","automated":"a"},"inconsiderate":{"unmanned":"a"},"note":"Using gender neutral language means users will help to break up gender stereotypes."},{"id":"moaning","type":"basic","categories":["a"],"considerate":{"whining":"a","complaining":"a","crying":"a"},"inconsiderate":{"bitching":"a","moaning":"a"}},{"id":"moan","type":"basic","categories":["a"],"considerate":{"whine":"a","complain":"a","cry":"a"},"inconsiderate":{"bitch":"a","moan":"a"}},{"id":"wifebeater","type":"basic","categories":["a"],"considerate":{"tank top":"a","sleeveless undershirt":"a"},"inconsiderate":{"wife beater":"a","wifebeater":"a"}},{"id":"ancient-man","type":"basic","categories":["a"],"considerate":{"ancient civilization":"a","ancient people":"a"},"inconsiderate":{"ancient man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"authoress","type":"basic","categories":["a"],"considerate":{"author":"a","writer":"a"},"inconsiderate":{"authoress":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"average-housewife","type":"basic","categories":["a"],"considerate":{"average consumer":"a","average household":"a","average homemaker":"a"},"inconsiderate":{"average housewife":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"average-man","type":"basic","categories":["a"],"considerate":{"average person":"a"},"inconsiderate":{"average man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"average-working-man","type":"basic","categories":["a"],"considerate":{"average wage earner":"a","average taxpayer":"a"},"inconsiderate":{"average working man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"aviatrix","type":"basic","categories":["a"],"considerate":{"aviator":"a"},"inconsiderate":{"aviatrix":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"brotherhood-of-man","type":"basic","categories":["a"],"considerate":{"the human family":"a"},"inconsiderate":{"brotherhood of man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"calendar-girl","type":"basic","categories":["a"],"considerate":{"model":"a"},"inconsiderate":{"calendar girl":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"call-girl","type":"basic","categories":["a"],"considerate":{"escort":"a","prostitute":"a","sex worker":"a"},"inconsiderate":{"call girl":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"churchman","type":"basic","categories":["a"],"considerate":{"cleric":"a","practicing Christian":"a","pillar of the Church":"a"},"inconsiderate":{"churchman":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"english-master","type":"basic","categories":["a"],"considerate":{"english coordinator":"a","senior teacher of english":"a"},"inconsiderate":{"english master":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"englishmen","type":"basic","categories":["a"],"considerate":{"the english":"a"},"inconsiderate":{"englishmen":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"executrix","type":"basic","categories":["a"],"considerate":{"executor":"a"},"inconsiderate":{"executrix":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"father-of-*","type":"basic","categories":["a"],"considerate":{"founder of":"a"},"inconsiderate":{"father of *":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"founding-father","type":"basic","categories":["a"],"considerate":{"the founders":"a","founding leaders":"a","forebears":"a"},"inconsiderate":{"founding father":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"housemaid","type":"basic","categories":["a"],"considerate":{"house worker":"a","domestic help":"a"},"inconsiderate":{"housemaid":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"industrial-man","type":"basic","categories":["a"],"considerate":{"industrial civilization":"a","industrial people":"a"},"inconsiderate":{"industrial man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"lady-doctor","type":"basic","categories":["a"],"considerate":{"doctor":"a"},"inconsiderate":{"lady doctor":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"leading-lady","type":"basic","categories":["a"],"considerate":{"lead":"a"},"inconsiderate":{"leading lady":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"maiden","type":"basic","categories":["a"],"considerate":{"virgin":"a"},"inconsiderate":{"maiden":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"maiden-race","type":"basic","categories":["a"],"considerate":{"first race":"a"},"inconsiderate":{"maiden race":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"maiden-speech","type":"basic","categories":["a"],"considerate":{"first speech":"a"},"inconsiderate":{"maiden speech":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-a-desk","type":"basic","categories":["a"],"considerate":{"staff a desk":"a"},"inconsiderate":{"man a desk":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-in-the-street","type":"basic","categories":["a"],"considerate":{"ordinary citizen":"a","typical person":"a","average person":"a"},"inconsiderate":{"man in the street":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-of-the-land","type":"basic","categories":["a"],"considerate":{"farmer":"a","rural worker":"a","grazier":"a","landowner":"a","rural community":"a","country people":"a","country folk":"a"},"inconsiderate":{"man of the land":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"mans-best-friend","type":"basic","categories":["a"],"considerate":{"a faithful dog":"a"},"inconsiderate":{"mans best friend":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-the-booth","type":"basic","categories":["a"],"considerate":{"staff the booth":"a"},"inconsiderate":{"man the booth":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"man-the-phones","type":"basic","categories":["a"],"considerate":{"answer the phones":"a"},"inconsiderate":{"man the phones":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"mansized-task","type":"basic","categories":["a"],"considerate":{"a demanding task":"a","a big job":"a"},"inconsiderate":{"mansized task":"a","man sized task":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"master-key","type":"basic","categories":["a"],"considerate":{"pass key":"a","original":"a"},"inconsiderate":{"master key":"a","master copy":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"master-plan","type":"basic","categories":["a"],"considerate":{"grand scheme":"a","guiding principles":"a"},"inconsiderate":{"master plan":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"master-the-art","type":"basic","categories":["a"],"considerate":{"become skilled":"a"},"inconsiderate":{"master the art":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"men-of-science","type":"basic","categories":["a"],"considerate":{"scientists":"a"},"inconsiderate":{"men of science":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"midwife","type":"basic","categories":["a"],"considerate":{"birthing nurse":"a"},"inconsiderate":{"midwife":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"modern-man","type":"basic","categories":["a"],"considerate":{"modern civilization":"a","modern people":"a"},"inconsiderate":{"modern man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"no-mans-land","type":"basic","categories":["a"],"considerate":{"unoccupied territory":"a","wasteland":"a","deathtrap":"a"},"inconsiderate":{"no mans land":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"office-girls","type":"basic","categories":["a"],"considerate":{"administrative staff":"a"},"inconsiderate":{"office girls":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"poetess","type":"basic","categories":["a"],"considerate":{"poet":"a"},"inconsiderate":{"poetess":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"railwayman","type":"basic","categories":["a"],"considerate":{"railway worker":"a"},"inconsiderate":{"railwayman":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"sportsmanlike","type":"basic","categories":["a"],"considerate":{"fair":"a","sporting":"a"},"inconsiderate":{"sportsmanlike":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"sportsmanship","type":"basic","categories":["a"],"considerate":{"fairness":"a","good humor":"a","sense of fair play":"a"},"inconsiderate":{"sportsmanship":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"statesmanlike","type":"basic","categories":["a"],"considerate":{"diplomatic":"a"},"inconsiderate":{"statesmanlike":"a","statesman like":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"stockman","type":"basic","categories":["a"],"considerate":{"cattle worker":"a","farmhand":"a","drover":"a"},"inconsiderate":{"stockman":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"tradesmans-entrance","type":"basic","categories":["a"],"considerate":{"service entrance":"a"},"inconsiderate":{"tradesmans entrance":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"tax-man","type":"basic","categories":["a"],"considerate":{"tax commissioner":"a","tax office":"a","tax collector":"a"},"inconsiderate":{"tax man":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"usherette","type":"basic","categories":["a"],"considerate":{"usher":"a"},"inconsiderate":{"usherette":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"woman-lawyer","type":"basic","categories":["a"],"considerate":{"lawyer":"a"},"inconsiderate":{"woman lawyer":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"woman-painter","type":"basic","categories":["a"],"considerate":{"painter":"a"},"inconsiderate":{"woman painter":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"working-wife","type":"basic","categories":["a"],"considerate":{"wage or salary earning woman":"a","two-income family":"a"},"inconsiderate":{"working mother":"a","working wife":"a"},"note":"Source: https://radyananda.wordpress.com/2009/06/06/nonsexist-alternative-language-handbook-for-conscious-writers/"},{"id":"homosexual","type":"basic","categories":["a"],"considerate":{"gay":"a","gay man":"a","lesbian":"a","gay person/people":"a"},"inconsiderate":{"homosexual":"a"},"note":"This term has a clinical history and is used to imply LGBTQ+ people are diseased or psychologically/emotionally disordered (source: https://www.glaad.org/reference/offensive)"},{"id":"homosexual-relations","type":"basic","categories":["a"],"considerate":{"relationship":"a"},"inconsiderate":{"homosexual relations":"a","homosexual relationship":"a"},"note":"Avoid labeling something as LGBTQ+ unless you would call the same thing “straight” (source: https://www.glaad.org/reference/offensive)"},{"id":"homosexual-couple","type":"basic","categories":["a"],"considerate":{"couple":"a"},"inconsiderate":{"homosexual couple":"a"},"note":"Avoid labeling something as LGBTQ+ unless you would call the same thing “straight” (source: https://www.glaad.org/reference/offensive)"},{"id":"sexual-preference","type":"basic","categories":["a"],"considerate":{"sexual orientation":"a","orientation":"a"},"inconsiderate":{"sexual preference":"a"},"note":"Implies that being LGBTQ+ is a choice (source: https://www.glaad.org/reference/offensive)"},{"id":"gay-lifestyle","type":"basic","categories":["a"],"considerate":{"gay lives":"a","gay/lesbian lives":"a"},"inconsiderate":{"gay lifestyle":"a","homosexual lifestyle":"a"},"note":"Implies that being LGBTQ+ is a choice (source: https://www.glaad.org/reference/offensive)"},{"id":"gay-agenda","type":"basic","categories":["a"],"considerate":{"gay issues":"a"},"inconsiderate":{"gay agenda":"a","homosexual agenda":"a"},"note":"Used by anti-LGBTQ+ extremists to create a climate of fear around LGBTQ+ issues (source: https://www.glaad.org/reference/offensive)"},{"id":"gay-rights","type":"basic","categories":["a"],"considerate":{"equal rights":"a","civil rights for gay people":"a"},"inconsiderate":{"special rights":"a","gay rights":"a"},"note":"LGBTQ+ rights are human rights (source: https://www.glaad.org/reference/style)"},{"id":"fag","type":"basic","categories":["a"],"considerate":{"gay":"a"},"inconsiderate":{"fag":"a","faggot":"a","dyke":"a","homo":"a","sodomite":"a"},"note":"Derogatory terms for LGBTQ+ people are offensive (source: https://www.glaad.org/reference/offensive)"},{"id":"bi","type":"basic","categories":["a"],"considerate":{"bisexual":"a"},"inconsiderate":{"bi":"a"},"note":"Avoid using slang shorthand (source: https://www.glaad.org/reference/style)"},{"id":"homosexual-marriage","type":"basic","categories":["a"],"considerate":{"gay marriage":"a","same-sex marriage":"a"},"inconsiderate":{"homosexual marriage":"a"},"note":"Homosexual has a clinical history and is used to imply LGBTQ+ people are diseased or psychologically/emotionally disordered (source: https://www.glaad.org/reference/style)"},{"id":"tranny","type":"basic","categories":["a"],"considerate":{"transgender":"a"},"inconsiderate":{"tranny":"a"},"note":"Derogatory terms for LGBTQ+ people are offensive (source: https://www.glaad.org/reference/style)"},{"id":"transvestite","type":"basic","categories":["a"],"considerate":{"cross-dresser":"a"},"inconsiderate":{"transvestite":"a"},"note":"Avoid using outdated / offensive terms (source: https://www.glaad.org/reference/transgender)"},{"id":"sexchange","type":"basic","categories":["a"],"considerate":{"transition":"a","gender confirmation surgery":"a"},"inconsiderate":{"sexchange":"a","sex change":"a"},"note":"Avoid overemphasizing surgery when discussing transgender people or the process of transition - it’s not a necessary component (source: https://www.glaad.org/reference/transgender)"},{"id":"sex-change-operation","type":"basic","categories":["a"],"considerate":{"sex reassignment surgery":"a","gender confirmation surgery":"a"},"inconsiderate":{"sex change operation":"a"},"note":"Shift focus away from the assigned sex and towards the identified gender (source: https://www.glaad.org/reference/transgender)"},{"id":"transgenders","type":"basic","categories":["a"],"considerate":{"transgender people":"a"},"inconsiderate":{"transgenders":"a"},"note":"Transgender should be used as an adjective, not as a noun (source: https://www.glaad.org/reference/transgender)"},{"id":"transgendered","type":"basic","categories":["a"],"considerate":{"transgender":"a"},"inconsiderate":{"transgendered":"a"},"note":"Transgender is already an adjective (source: https://www.glaad.org/reference/transgender)"},{"id":"transgenderism","type":"basic","categories":["a"],"considerate":{"being transgender":"a","the movement for transgender equality":"a"},"inconsiderate":{"transgenderism":"a"},"note":"This is a term used by anti-transgender activists to dehumanize transgender people and reduce who they are to a condition (source: https://www.glaad.org/reference/transgender)"},{"id":"born-a-man","type":"basic","categories":["a"],"considerate":{"assigned male at birth":"a","designated male at birth":"a"},"inconsiderate":{"biologically male":"a","born a man":"a","genetically male":"a"},"note":"Assigned birth gender is complicated; gender identity is more than what your parents decided you were at birth"},{"id":"born-a-woman","type":"basic","categories":["a"],"considerate":{"assigned female at birth":"a","designated female at birth":"a"},"inconsiderate":{"biologically female":"a","born a woman":"a","genetically female":"a"},"note":"Assigned birth gender is complicated; gender identity is more than what your parents decided you were at birth"},{"id":"bathroom-bill","type":"basic","categories":["a"],"considerate":{"non-discrimination law":"a","non-discrimination ordinance":"a"},"inconsiderate":{"bathroom bill":"a"},"note":"A term created and used by far-right extremists to oppose nondiscrimination laws that protect transgender people (source: https://www.glaad.org/reference/transgender)"},{"id":"hermaphroditic","type":"basic","categories":["a"],"considerate":{"intersex":"a"},"inconsiderate":{"hermaphroditic":"a","pseudohermaphroditic":"a","pseudo hermaphroditic":"a"},"note":"These terms are stigmatizing to patients and their families because intersex status is more complicated than the mere presence or absence of certain gonadal tissues (source: http://www.isna.org/node/979)"},{"id":"hermaphrodite","type":"basic","categories":["a"],"considerate":{"person who is intersex":"a","person":"a","intersex person":"a"},"inconsiderate":{"hermaphrodite":"a","pseudohermaphrodite":"a","pseudo hermaphrodite":"a"},"note":"These terms are stigmatizing to patients and their families because intersex status is more complicated than the mere presence or absence of certain gonadal tissues (source: http://www.isna.org/node/979)"},{"id":"heshe","type":"basic","categories":["a"],"considerate":{"transgender person":"a","person":"a"},"inconsiderate":{"shemale":"a","she male":"a","heshe":"a","shehe":"a"},"note":"This word dehumanizes transgender people (source: https://www.reddit.com/r/asktransgender/comments/23wbq1/is_the_term_shemale_seen_as_offensive/)"},{"id":"islamist","type":"basic","categories":["a"],"considerate":{"muslim":"a","person of Islamic faith":"a","fanatic":"a","zealot":"a","follower of islam":"a","follower of the islamic faith":"a"},"inconsiderate":{"islamist":"a"},"note":"Source: https://www.usnews.com/news/newsgram/articles/2013/04/04/the-associated-press-revises-islamist-another-politically-charged-term"},{"id":"islamists","type":"basic","categories":["a"],"considerate":{"muslims":"a","people of Islamic faith":"a","fanatics":"a","zealots":"a"},"inconsiderate":{"islamists":"a"},"note":"Source: https://www.usnews.com/news/newsgram/articles/2013/04/04/the-associated-press-revises-islamist-another-politically-charged-term"},{"id":"master","type":"basic","categories":["a"],"considerate":{"primary":"a","hub":"a","reference":"a"},"inconsiderate":{"master":"a"},"note":"Avoid using the term `master`; these suggestions are for the computer term, but there are better alternatives for other cases too"},{"id":"masters","type":"basic","categories":["a"],"considerate":{"primaries":"a","hubs":"a","references":"a"},"inconsiderate":{"masters":"a"},"note":"Avoid using the term `master`; these suggestions are for the computer term, but there are better alternatives for other cases too"},{"id":"eskimo","type":"basic","categories":["a"],"considerate":{"Inuit":"a"},"inconsiderate":{"eskimo":"a"}},{"id":"eskimos","type":"basic","categories":["a"],"considerate":{"Inuits":"a"},"inconsiderate":{"eskimos":"a"}},{"id":"oriental","type":"basic","categories":["a"],"considerate":{"Asian person":"a"},"inconsiderate":{"oriental":"a"}},{"id":"orientals","type":"basic","categories":["a"],"considerate":{"Asian people":"a"},"inconsiderate":{"orientals":"a"}},{"id":"nonwhite","type":"basic","categories":["a"],"considerate":{"person of color":"a","people of color":"a"},"inconsiderate":{"nonwhite":"a","non white":"a"}},{"id":"ghetto","type":"basic","categories":["a"],"considerate":{"projects":"a","urban":"a"},"inconsiderate":{"ghetto":"a"}},{"id":"redskin","type":"basic","categories":["a"],"considerate":{"Native American":"a"},"inconsiderate":{"red indian":"a","pocahontas":"a","redskin":"a"}},{"id":"redskins","type":"basic","categories":["a"],"considerate":{"Native American People":"a"},"inconsiderate":{"red indians":"a","redskins":"a"}},{"id":"totem","type":"basic","categories":["a"],"considerate":{"favorite":"a","inspiration":"a","personal interest":"a","personality type":"a"},"inconsiderate":{"animal spirit":"a","dream catcher":"a","spirit animal":"a","totem":"a"},"note":"Avoid using terms that oversimplify the complex and varied beliefs of indigenous religions. (source: https://www.worldreligionnews.com/opinion/spirit-animal-not-joke-oppression,https://www.spiralnature.com/spirituality/spirit-animal-cultural-appropriation)"},{"id":"long-time-no-see","type":"basic","categories":["a"],"considerate":{"I haven’t seen you in a long time":"a","it’s been a long time":"a"},"inconsiderate":{"long time no hear":"a","long time no see":"a"},"note":"Avoid using phrases that implicitly mock people with limited knowledge of the English language. (source: https://www.npr.org/sections/codeswitch/2014/03/09/288300303/who-first-said-long-time-no-see-and-in-which-language)"},{"id":"indian-country","type":"basic","categories":["a"],"considerate":{"enemy territory":"a"},"inconsiderate":{"Indian country":"a"},"note":"Avoid using phrases referring to the genocidal United States “Indian Removal” laws. (source: https://newsmaven.io/indiancountrytoday/archive/off-the-reservation-a-teachable-moment-nW1d7U0JRkOszhtg8N1V1A/)"},{"id":"off-reserve","type":"basic","categories":["a"],"considerate":{"disobey":"a","endure":"a","object to":"a","oppose":"a","resist":"a"},"inconsiderate":{"jump the reservation":"a","off reserve":"a","off the reservation":"a"},"note":"Avoid using phrases referring to the genocidal United States “Indian Removal” laws. (source: http://blog.nativepartnership.org/off-the-reservation/,https://www.wsj.com/articles/off-the-reservation-is-a-phrase-with-a-dark-past-1462552837,https://www.npr.org/sections/codeswitch/2014/06/29/326690947/should-saying-someone-is-off-the-reservation-be-off-limits,https://nowtoronto.com/news/native-references-and-terms-that-are-offensive-to-indigenous-people/)"},{"id":"on-the-warpath","type":"basic","categories":["a"],"considerate":{"defend":"a"},"inconsiderate":{"circle the wagons":"a","on the warpath":"a"},"note":"Avoid using phrases referring to colonial stereotypes regarding Native Americans. (source: https://idioms.thefreedictionary.com/circle+the+wagons,https://idioms.thefreedictionary.com/go+on+the+warpath)"},{"id":"too-many-chiefs","type":"basic","categories":["a"],"considerate":{"too many chefs in the kitchen":"a","too many cooks spoil the broth":"a"},"inconsiderate":{"too many chiefs":"a"},"note":"Avoid using phrases referring to colonial stereotypes regarding Native Americans. (source: https://idioms.thefreedictionary.com/too+many+chiefs+and+not+enough+Indians)"},{"id":"natives-are-restless","type":"basic","categories":["a"],"considerate":{"dissatisfied":"a","frustrated":"a"},"inconsiderate":{"natives are restless":"a","natives are becoming restless":"a","natives are getting restless":"a","natives are growing restless":"a"},"note":"Avoid using phrases referring to colonial stereotypes regarding indigenous peoples. (source: https://tvtropes.org/pmwiki/pmwiki.php/Main/TheNativesAreRestless)"},{"id":"powwow","type":"basic","categories":["a"],"considerate":{"conference":"a","gathering":"a","meeting":"a"},"inconsiderate":{"pow wow":"a","powwow":"a"},"note":"Avoid casually using this term, which refers to traditional indigenous celebration ceremonies that were banned by genocidal laws in the United States and Canada — Native people died fighting for this right. (source: https://twitter.com/chadloder/status/1203507070772793345,http://nativeappropriations.com/2012/09/paul-frank-offends-every-native-person-on-the-planet-with-fashion-night-out-dream-catchin-pow-wow.html,https://www.britannica.com/topic/powwow,https://nowtoronto.com/news/native-references-and-terms-that-are-offensive-to-indigenous-people/)"},{"id":"indian-give","type":"basic","categories":["a"],"considerate":{"go back on one’s offer":"a"},"inconsiderate":{"indian give":"a","indian giver":"a"},"note":"Avoid using phrases referring to colonial stereotypes regarding Native Americans."},{"id":"pinoys","type":"basic","categories":["a"],"considerate":{"Filipinos":"a","Filipino people":"a"},"inconsiderate":{"pinoys":"a","pinays":"a"}},{"id":"towel-heads","type":"basic","categories":["a"],"considerate":{"Arabs":"a","Middle Eastern People":"a"},"inconsiderate":{"sand niggers":"a","towel heads":"a"}},{"id":"latino","type":"basic","categories":["a"],"considerate":{"Latinx":"a"},"inconsiderate":{"latino":"a","latina":"a","mexican":"a"},"note":"Whenever possible, try to be gender inclusive."},{"id":"japs","type":"basic","categories":["a"],"considerate":{"Japanese person":"a","Japanese people":"a"},"inconsiderate":{"japs":"a"}},{"id":"hymie","type":"basic","categories":["a"],"considerate":{"Jewish person":"a"},"inconsiderate":{"shlomo":"a","shyster":"a","hymie":"a"}},{"id":"goy","type":"basic","categories":["a"],"considerate":{"a person who is not Jewish":"a","not Jewish":"a"},"inconsiderate":{"goyim":"a","goyum":"a","goy":"a"}},{"id":"spade","type":"basic","categories":["a"],"considerate":{"a Black person":"a"},"inconsiderate":{"spade":"a"}},{"id":"gyp","type":"basic","categories":["a"],"considerate":{"Nomad":"a","Traveler":"a","Roma":"a","Romani":"a"},"inconsiderate":{"gyppo":"a","gypsy":"a","Gipsy":"a","gyp":"a"},"note":"Gypsy is insensitive, use Roma or Romani. They’re not Egyptian as the name suggests. (source: en.wikipedia.org/wiki/Romani_people#cite_ref-80)"},{"id":"blacklist","type":"basic","categories":["a"],"considerate":{"blocklist":"a","wronglist":"a","banlist":"a","deny list":"a"},"inconsiderate":{"blacklist":"a","black list":"a"},"note":"Replace racially-charged language with more accurate and inclusive words"},{"id":"whitelist","type":"basic","categories":["a"],"considerate":{"passlist":"a","alrightlist":"a","safelist":"a","allow list":"a"},"inconsiderate":{"whitelist":"a","white list":"a"},"note":"Replace racially-charged language with more accurate and inclusive words"},{"id":"savage","type":"basic","categories":["a"],"considerate":{"simple":"a","indigenous":"a","hunter-gatherer":"a"},"inconsiderate":{"primitive":"a","savage":"a","stone age":"a"},"note":"Avoid using terms that imply a group has not changed over time and that they are inferior"},{"id":"tribe","type":"basic","categories":["a"],"considerate":{"society":"a","community":"a"},"inconsiderate":{"tribe":"a"},"note":"Avoid using terms that make some groups sound inferior"},{"id":"sophisticated-culture","type":"basic","categories":["a"],"considerate":{"complex culture":"a"},"inconsiderate":{"sophisticated culture":"a"},"note":"Avoid using terms that make some groups sound inferior. Replace “sophisticated” with a neutral term such as “complex”"},{"id":"sophisticated-technology","type":"basic","categories":["a"],"considerate":{"complex technology":"a"},"inconsiderate":{"sophisticated technology":"a"},"note":"Avoid using terms that make some groups sound inferior. Replace “sophisticated” with a neutral term such as “complex”"},{"id":"bugreport","type":"basic","categories":["a"],"considerate":{"bug report":"a","snapshot":"a"},"inconsiderate":{"bugreport":"a"},"note":"Avoid using `bugreport`, as the word `bugre` is a slur in Brazilian Portuguese"},{"id":"make-*-great-again","type":"basic","categories":["a"],"considerate":{"improve":"a"},"inconsiderate":{"make * great again":"a","make * * great again":"a","make * * * great again":"a","make * * * * great again":"a","make * * * * * great again":"a"}},{"id":"committed-suicide","type":"basic","categories":["a"],"considerate":{"died by suicide":"a"},"inconsiderate":{"committed suicide":"a","completed suicide":"a"},"note":"Source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide, https://www.speakingofsuicide.com/2013/04/13/language/"},{"id":"commit-suicide","type":"basic","categories":["a"],"considerate":{"die by suicide":"a"},"inconsiderate":{"commit suicide":"a","complete suicide":"a","successful suicide":"a"},"note":"Committing suicide is not successful/unsuccessful, that sends the wrong message (source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide, https://www.speakingofsuicide.com/2013/04/13/language/)"},{"id":"suicide-pact","type":"basic","categories":["a"],"considerate":{"rise in suicides":"a"},"inconsiderate":{"suicide epidemic":"a","epidemic of suicides":"a","suicide pact":"a"},"note":"Using sensational words can cause copycat suicides or contagion (source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide)"},{"id":"failed-suicide","type":"basic","categories":["a"],"considerate":{"suicide attempt":"a","attempted suicide":"a"},"inconsiderate":{"failed suicide":"a","failed attempt":"a","suicide failure":"a"},"note":"Attempted suicide should not be depicted as a failure (source: https://www.speakingofsuicide.com/2013/04/13/language, https://www.afsp.org/news-events/for-the-media/reporting-on-suicide)"},{"id":"suicide-note","type":"basic","categories":["a"],"considerate":{"a note from the deceased":"a"},"inconsiderate":{"suicide note":"a"},"note":"Source: https://www.afsp.org/news-events/for-the-media/reporting-on-suicide"},{"id":"hang","type":"basic","categories":["a"],"considerate":{"the app froze":"a","the app stopped responding":"a","the app stopped responding to events":"a","the app became unresponsive":"a"},"inconsiderate":{"hang":"a","hanged":"a"},"note":"When describing the behavior of computer software, using the word “hanged” needlessly invokes the topic of death by self-harm or lynching.  Consider using the word “froze” or the phrase “stopped responding to events” or “became unresponsive” instead."}];
 
 /***/ }),
 /* 761 */
@@ -32033,7 +34151,89 @@ module.exports = {
 /* 775 */,
 /* 776 */,
 /* 777 */,
-/* 778 */,
+/* 778 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = factory
+
+function factory(file) {
+  var contents = indices(String(file))
+  var toPoint = offsetToPointFactory(contents)
+
+  return {
+    toPoint: toPoint,
+    toPosition: toPoint,
+    toOffset: pointToOffsetFactory(contents)
+  }
+}
+
+// Factory to get the line and column-based `point` for `offset` in the bound
+// indices.
+function offsetToPointFactory(indices) {
+  return offsetToPoint
+
+  // Get the line and column-based `point` for `offset` in the bound indices.
+  function offsetToPoint(offset) {
+    var index = -1
+    var length = indices.length
+
+    if (offset < 0) {
+      return {}
+    }
+
+    while (++index < length) {
+      if (indices[index] > offset) {
+        return {
+          line: index + 1,
+          column: offset - (indices[index - 1] || 0) + 1,
+          offset: offset
+        }
+      }
+    }
+
+    return {}
+  }
+}
+
+// Factory to get the `offset` for a line and column-based `point` in the
+// bound indices.
+function pointToOffsetFactory(indices) {
+  return pointToOffset
+
+  // Get the `offset` for a line and column-based `point` in the bound
+  // indices.
+  function pointToOffset(point) {
+    var line = point && point.line
+    var column = point && point.column
+
+    if (!isNaN(line) && !isNaN(column) && line - 1 in indices) {
+      return (indices[line - 2] || 0) + column - 1 || 0
+    }
+
+    return -1
+  }
+}
+
+// Get indices of line-breaks in `value`.
+function indices(value) {
+  var result = []
+  var index = value.indexOf('\n')
+
+  while (index !== -1) {
+    result.push(index + 1)
+    index = value.indexOf('\n', index + 1)
+  }
+
+  result.push(value.length + 1)
+
+  return result
+}
+
+
+/***/ }),
 /* 779 */,
 /* 780 */,
 /* 781 */
@@ -32069,7 +34269,127 @@ module.exports = {
 
 /***/ }),
 /* 782 */,
-/* 783 */,
+/* 783 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var decode = __webpack_require__(277)
+var decimal = __webpack_require__(926)
+var alphabetical = __webpack_require__(341)
+var locate = __webpack_require__(305)
+
+module.exports = email
+email.locator = locate
+email.notInLink = true
+
+var plusSign = 43 // '+'
+var dash = 45 // '-'
+var dot = 46 // '.'
+var atSign = 64 // '@'
+var underscore = 95 // '_'
+
+function email(eat, value, silent) {
+  var self = this
+  var gfm = self.options.gfm
+  var tokenizers = self.inlineTokenizers
+  var index = 0
+  var length = value.length
+  var firstDot = -1
+  var code
+  var content
+  var children
+  var exit
+
+  if (!gfm) {
+    return
+  }
+
+  code = value.charCodeAt(index)
+
+  while (
+    decimal(code) ||
+    alphabetical(code) ||
+    code === plusSign ||
+    code === dash ||
+    code === dot ||
+    code === underscore
+  ) {
+    code = value.charCodeAt(++index)
+  }
+
+  if (index === 0) {
+    return
+  }
+
+  if (code !== atSign) {
+    return
+  }
+
+  index++
+
+  while (index < length) {
+    code = value.charCodeAt(index)
+
+    if (
+      decimal(code) ||
+      alphabetical(code) ||
+      code === dash ||
+      code === dot ||
+      code === underscore
+    ) {
+      index++
+
+      if (firstDot === -1 && code === dot) {
+        firstDot = index
+      }
+
+      continue
+    }
+
+    break
+  }
+
+  if (
+    firstDot === -1 ||
+    firstDot === index ||
+    code === dash ||
+    code === underscore
+  ) {
+    return
+  }
+
+  if (code === dot) {
+    index--
+  }
+
+  content = value.slice(0, index)
+
+  /* istanbul ignore if - never used (yet) */
+  if (silent) {
+    return true
+  }
+
+  exit = self.enterLink()
+
+  // Temporarily remove all tokenizers except text in url.
+  self.inlineTokenizers = {text: tokenizers.text}
+  children = self.tokenizeInline(content, eat.now())
+  self.inlineTokenizers = tokenizers
+
+  exit()
+
+  return eat(content)({
+    type: 'link',
+    title: null,
+    url: 'mailto:' + decode(content, {nonTerminated: false}),
+    children: children
+  })
+}
+
+
+/***/ }),
 /* 784 */,
 /* 785 */
 /***/ (function(module) {
@@ -32423,7 +34743,27 @@ module.exports = Preprocessor;
 
 /***/ }),
 /* 800 */,
-/* 801 */,
+/* 801 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+
+var stripIndent = __webpack_require__(947)
+
+module.exports = dedentExpression
+
+var lineFeed = '\n'
+
+function dedentExpression(value) {
+  var lines = value.trim().split(lineFeed)
+  var head = lines.shift()
+  var rest = stripIndent(lines.join(lineFeed))
+  return head + (rest ? lineFeed + rest : '')
+}
+
+
+/***/ }),
 /* 802 */,
 /* 803 */
 /***/ (function(module) {
@@ -32558,7 +34898,7 @@ var instructionCloseExpression = /\?>/
 var directiveOpenExpression = /^<![A-Za-z]/
 var directiveCloseExpression = />/
 var cdataOpenExpression = /^<!\[CDATA\[/
-var cdataCloseExpression = /\]\]>/
+var cdataCloseExpression = /]]>/
 var elementCloseExpression = /^$/
 var otherElementOpenExpression = new RegExp(openCloseTag.source + '\\s*$')
 
@@ -35530,7 +37870,7 @@ exports.restEndpointMethods = restEndpointMethods;
 
 var merge = __webpack_require__(986)
 var xlink = __webpack_require__(220)
-var xml = __webpack_require__(144)
+var xml = __webpack_require__(736)
 var xmlns = __webpack_require__(534)
 var aria = __webpack_require__(857)
 var svg = __webpack_require__(571)
@@ -35624,7 +37964,7 @@ module.exports = {
 
 module.exports = interrupt
 
-function interrupt(interruptors, tokenizers, ctx, params) {
+function interrupt(interruptors, tokenizers, ctx, parameters) {
   var length = interruptors.length
   var index = -1
   var interruptor
@@ -35648,7 +37988,7 @@ function interrupt(interruptors, tokenizers, ctx, params) {
       continue
     }
 
-    if (tokenizers[interruptor[0]].apply(ctx, params)) {
+    if (tokenizers[interruptor[0]].apply(ctx, parameters)) {
       return true
     }
   }
@@ -36162,7 +38502,16 @@ if (typeof fs.realpath.native === 'function') {
 /* 873 */,
 /* 874 */,
 /* 875 */,
-/* 876 */,
+/* 876 */
+/***/ (function(module) {
+
+module.exports = color
+function color(d) {
+  return '\u001B[33m' + d + '\u001B[39m'
+}
+
+
+/***/ }),
 /* 877 */,
 /* 878 */,
 /* 879 */,
@@ -36318,6 +38667,7 @@ module.exports = {
 module.exports = visitParents
 
 var convert = __webpack_require__(487)
+var color = __webpack_require__(876)
 
 var CONTINUE = true
 var SKIP = 'skip'
@@ -36330,7 +38680,7 @@ visitParents.EXIT = EXIT
 function visitParents(tree, test, visitor, reverse) {
   var is
 
-  if (typeof test === 'function' && typeof visitor !== 'function') {
+  if (func(test) && !func(visitor)) {
     reverse = visitor
     visitor = test
     test = null
@@ -36338,38 +38688,57 @@ function visitParents(tree, test, visitor, reverse) {
 
   is = convert(test)
 
-  one(tree, null, [])
+  one(tree, null, [])()
 
-  // Visit a single node.
-  function one(node, index, parents) {
-    var result = []
-    var subresult
+  function one(child, index, parents) {
+    var value = object(child) ? child : {}
+    var name
 
-    if (!test || is(node, index, parents[parents.length - 1] || null)) {
-      result = toResult(visitor(node, parents))
+    if (string(value.type)) {
+      name = string(value.tagName)
+        ? value.tagName
+        : string(value.name)
+        ? value.name
+        : undefined
 
-      if (result[0] === EXIT) {
+      node.displayName =
+        'node (' + color(value.type + (name ? '<' + name + '>' : '')) + ')'
+    }
+
+    return node
+
+    function node() {
+      var result = []
+      var subresult
+
+      if (!test || is(child, index, parents[parents.length - 1] || null)) {
+        result = toResult(visitor(child, parents))
+
+        if (result[0] === EXIT) {
+          return result
+        }
+      }
+
+      if (!child.children || result[0] === SKIP) {
         return result
       }
-    }
 
-    if (node.children && result[0] !== SKIP) {
-      subresult = toResult(all(node.children, parents.concat(node)))
+      subresult = toResult(children(child.children, parents.concat(child)))
       return subresult[0] === EXIT ? subresult : result
     }
-
-    return result
   }
 
   // Visit children in `parent`.
-  function all(children, parents) {
+  function children(children, parents) {
     var min = -1
     var step = reverse ? -1 : 1
     var index = (reverse ? children.length : min) + step
+    var child
     var result
 
     while (index > min && index < children.length) {
-      result = one(children[index], index, parents)
+      child = children[index]
+      result = one(child, index, parents)()
 
       if (result[0] === EXIT) {
         return result
@@ -36381,7 +38750,7 @@ function visitParents(tree, test, visitor, reverse) {
 }
 
 function toResult(value) {
-  if (value !== null && typeof value === 'object' && 'length' in value) {
+  if (object(value) && 'length' in value) {
     return value
   }
 
@@ -36390,6 +38759,18 @@ function toResult(value) {
   }
 
   return [value]
+}
+
+function func(d) {
+  return typeof d === 'function'
+}
+
+function string(d) {
+  return typeof d === 'string'
+}
+
+function object(d) {
+  return typeof d === 'object' && d !== null
 }
 
 
@@ -36449,11 +38830,15 @@ function factory(type) {
         name = methods[index]
         method = tokenizers[name]
 
+        // Previously, we had constructs such as footnotes and YAML that used
+        // these properties.
+        // Those are now external (plus there are userland extensions), that may
+        // still use them.
         if (
           method &&
           /* istanbul ignore next */ (!method.onlyAtStart || self.atStart) &&
-          (!method.notInList || !self.inList) &&
-          (!method.notInBlock || !self.inBlock) &&
+          /* istanbul ignore next */ (!method.notInList || !self.inList) &&
+          /* istanbul ignore next */ (!method.notInBlock || !self.inBlock) &&
           (!method.notInLink || !self.inLink)
         ) {
           valueLength = value.length
@@ -36512,7 +38897,7 @@ function factory(type) {
 
       // Done.  Called when the last character is eaten to retrieve the range’s
       // offsets.
-      return function() {
+      return function () {
         var last = line + 1
 
         while (pos < last) {
@@ -36563,10 +38948,10 @@ function factory(type) {
 
       // Add the position to a node.
       function update(node, indent) {
-        var prev = node.position
-        var start = prev ? prev.start : before
+        var previous = node.position
+        var start = previous ? previous.start : before
         var combined = []
-        var n = prev && prev.end.line
+        var n = previous && previous.end.line
         var l = before.line
 
         node.position = new Position(start)
@@ -36576,8 +38961,8 @@ function factory(type) {
         // because some information, the indent between `n` and `l` wasn’t
         // tracked.  Luckily, that space is (should be?) empty, so we can
         // safely check for it now.
-        if (prev && indent && prev.indent) {
-          combined = prev.indent
+        if (previous && indent && previous.indent) {
+          combined = previous.indent
 
           if (n < l) {
             while (++n < l) {
@@ -36600,21 +38985,21 @@ function factory(type) {
     // possible.
     function add(node, parent) {
       var children = parent ? parent.children : tokens
-      var prev = children[children.length - 1]
+      var previous = children[children.length - 1]
       var fn
 
       if (
-        prev &&
-        node.type === prev.type &&
+        previous &&
+        node.type === previous.type &&
         (node.type === 'text' || node.type === 'blockquote') &&
-        mergeable(prev) &&
+        mergeable(previous) &&
         mergeable(node)
       ) {
         fn = node.type === 'text' ? mergeText : mergeBlockquote
-        node = fn.call(self, prev, node)
+        node = fn.call(self, previous, node)
       }
 
-      if (node !== prev) {
+      if (node !== previous) {
         children.push(node)
       }
 
@@ -36699,27 +39084,54 @@ function mergeable(node) {
 }
 
 // Merge two text nodes: `node` into `prev`.
-function mergeText(prev, node) {
-  prev.value += node.value
+function mergeText(previous, node) {
+  previous.value += node.value
 
-  return prev
+  return previous
 }
 
 // Merge two blockquotes: `node` into `prev`, unless in CommonMark or gfm modes.
-function mergeBlockquote(prev, node) {
+function mergeBlockquote(previous, node) {
   if (this.options.commonmark || this.options.gfm) {
     return node
   }
 
-  prev.children = prev.children.concat(node.children)
+  previous.children = previous.children.concat(node.children)
 
-  return prev
+  return previous
 }
 
 
 /***/ }),
 /* 887 */,
-/* 888 */,
+/* 888 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = remove
+
+function remove(node) {
+  if ('length' in node) {
+    node.forEach(remove)
+  } else {
+    delete node.position
+
+    if (node.type === 'mdxTag') {
+      remove(node.attributes)
+    } else if (
+      node.type === 'mdxAttribute' &&
+      node.value &&
+      typeof node.value === 'object'
+    ) {
+      remove(node.value)
+    }
+  }
+}
+
+
+/***/ }),
 /* 889 */,
 /* 890 */
 /***/ (function(module) {
@@ -37879,53 +40291,43 @@ function extend() {
 
 /***/ }),
 /* 941 */
-/***/ (function(module) {
+/***/ (function(module, __unusedexports, __webpack_require__) {
 
 "use strict";
 
 
+var convert = __webpack_require__(24)
+
 module.exports = isElement
 
-// Check if if `node` is an `element` and, if `tagNames` is given, `node`
-// matches them `tagNames`.
-function isElement(node, tagNames) {
-  var name
+isElement.convert = convert
+
+// Check if if `node` is an `element` and whether it passes the given test.
+function isElement(node, test, index, parent, context) {
+  var hasParent = parent !== null && parent !== undefined
+  var hasIndex = index !== null && index !== undefined
+  var check = convert(test)
 
   if (
-    !(
-      tagNames === null ||
-      tagNames === undefined ||
-      typeof tagNames === 'string' ||
-      (typeof tagNames === 'object' && tagNames.length !== 0)
-    )
+    hasIndex &&
+    (typeof index !== 'number' || index < 0 || index === Infinity)
   ) {
-    throw new Error(
-      'Expected `string` or `Array.<string>` for `tagNames`, not `' +
-        tagNames +
-        '`'
-    )
+    throw new Error('Expected positive finite index for child node')
   }
 
-  if (
-    !node ||
-    typeof node !== 'object' ||
-    node.type !== 'element' ||
-    typeof node.tagName !== 'string'
-  ) {
+  if (hasParent && (!parent.type || !parent.children)) {
+    throw new Error('Expected parent node')
+  }
+
+  if (!node || !node.type || typeof node.type !== 'string') {
     return false
   }
 
-  if (tagNames === null || tagNames === undefined) {
-    return true
+  if (hasParent !== hasIndex) {
+    throw new Error('Expected both parent and index')
   }
 
-  name = node.tagName
-
-  if (typeof tagNames === 'string') {
-    return name === tagNames
-  }
-
-  return tagNames.indexOf(name) !== -1
+  return check.call(context, node, index, parent)
 }
 
 
@@ -38005,7 +40407,7 @@ function all(node) {
 
 var xtend = __webpack_require__(940)
 var toggle = __webpack_require__(4)
-var vfileLocation = __webpack_require__(684)
+var vfileLocation = __webpack_require__(635)
 var unescape = __webpack_require__(611)
 var decode = __webpack_require__(820)
 var tokenizer = __webpack_require__(886)
@@ -38053,13 +40455,13 @@ proto.enterBlock = toggle('inBlock', false)
 // In the above example, the thematic break “interupts” the paragraph.
 proto.interruptParagraph = [
   ['thematicBreak'],
+  ['list'],
   ['atxHeading'],
   ['fencedCode'],
   ['blockquote'],
   ['html'],
   ['setextHeading', {commonmark: false}],
-  ['definition', {commonmark: false}],
-  ['footnote', {commonmark: false}]
+  ['definition', {commonmark: false}]
 ]
 
 // Nodes that can interupt a list:
@@ -38074,8 +40476,7 @@ proto.interruptList = [
   ['atxHeading', {pedantic: false}],
   ['fencedCode', {pedantic: false}],
   ['thematicBreak', {pedantic: false}],
-  ['definition', {commonmark: false}],
-  ['footnote', {commonmark: false}]
+  ['definition', {commonmark: false}]
 ]
 
 // Nodes that can interupt a blockquote:
@@ -38094,13 +40495,12 @@ proto.interruptBlockquote = [
   ['thematicBreak', {commonmark: true}],
   ['html', {commonmark: true}],
   ['list', {commonmark: true}],
-  ['definition', {commonmark: false}],
-  ['footnote', {commonmark: false}]
+  ['definition', {commonmark: false}]
 ]
 
 // Handlers.
 proto.blockTokenizers = {
-  newline: __webpack_require__(952),
+  blankLine: __webpack_require__(506),
   indentedCode: __webpack_require__(418),
   fencedCode: __webpack_require__(442),
   blockquote: __webpack_require__(705),
@@ -38109,7 +40509,6 @@ proto.blockTokenizers = {
   list: __webpack_require__(194),
   setextHeading: __webpack_require__(803),
   html: __webpack_require__(804),
-  footnote: __webpack_require__(404),
   definition: __webpack_require__(117),
   table: __webpack_require__(224),
   paragraph: __webpack_require__(157)
@@ -38119,6 +40518,7 @@ proto.inlineTokenizers = {
   escape: __webpack_require__(703),
   autoLink: __webpack_require__(387),
   url: __webpack_require__(346),
+  email: __webpack_require__(783),
   html: __webpack_require__(446),
   link: __webpack_require__(79),
   reference: __webpack_require__(196),
@@ -38154,7 +40554,27 @@ function keys(value) {
 
 /***/ }),
 /* 946 */,
-/* 947 */,
+/* 947 */
+/***/ (function(module, __unusedexports, __webpack_require__) {
+
+"use strict";
+
+const minIndent = __webpack_require__(370);
+
+module.exports = string => {
+	const indent = minIndent(string);
+
+	if (indent === 0) {
+		return string;
+	}
+
+	const regex = new RegExp(`^[ \\t]{${indent}}`, 'gm');
+
+	return string.replace(regex, '');
+};
+
+
+/***/ }),
 /* 948 */
 /***/ (function(module) {
 
@@ -38240,61 +40660,7 @@ exports.checkBypass = checkBypass;
 
 /***/ }),
 /* 951 */,
-/* 952 */
-/***/ (function(module, __unusedexports, __webpack_require__) {
-
-"use strict";
-
-
-var whitespace = __webpack_require__(578)
-
-module.exports = newline
-
-var lineFeed = '\n'
-
-function newline(eat, value, silent) {
-  var character = value.charAt(0)
-  var length
-  var subvalue
-  var queue
-  var index
-
-  if (character !== lineFeed) {
-    return
-  }
-
-  /* istanbul ignore if - never used (yet) */
-  if (silent) {
-    return true
-  }
-
-  index = 1
-  length = value.length
-  subvalue = character
-  queue = ''
-
-  while (index < length) {
-    character = value.charAt(index)
-
-    if (!whitespace(character)) {
-      break
-    }
-
-    queue += character
-
-    if (character === lineFeed) {
-      subvalue += queue
-      queue = ''
-    }
-
-    index++
-  }
-
-  eat(subvalue)
-}
-
-
-/***/ }),
+/* 952 */,
 /* 953 */,
 /* 954 */,
 /* 955 */
@@ -39051,7 +41417,34 @@ exports.safeTrimTrailingSeparator = safeTrimTrailingSeparator;
 //# sourceMappingURL=internal-path-helper.js.map
 
 /***/ }),
-/* 973 */,
+/* 973 */
+/***/ (function(module) {
+
+"use strict";
+
+
+module.exports = indent
+
+var lineFeed = '\n'
+var before = '  '
+var content = /\S/
+
+function indent(value) {
+  var lines = value.split(lineFeed)
+  var length = lines.length
+  var index = -1
+  var line
+
+  while (++index < length) {
+    line = lines[index]
+    lines[index] = content.test(line) ? before + line : line
+  }
+
+  return lines.join(lineFeed)
+}
+
+
+/***/ }),
 /* 974 */,
 /* 975 */
 /***/ (function(module, __unusedexports, __webpack_require__) {
@@ -39097,20 +41490,21 @@ module.exports = {
 "use strict";
 
 
-var location = __webpack_require__(684)
+var location = __webpack_require__(778)
 var visit = __webpack_require__(83)
 
 module.exports = messageControl
 
 function messageControl(options) {
-  var name = options && options.name
-  var marker = options && options.marker
-  var test = options && options.test
-  var sources
-  var known
-  var reset
-  var enable
-  var disable
+  var settings = options || {}
+  var name = settings.name
+  var marker = settings.marker
+  var test = settings.test
+  var sources = settings.source
+  var known = settings.known
+  var reset = settings.reset
+  var enable = settings.enable || []
+  var disable = settings.disable || []
 
   if (!name) {
     throw new Error('Expected `name` in `options`, got `' + name + '`')
@@ -39119,12 +41513,6 @@ function messageControl(options) {
   if (!marker) {
     throw new Error('Expected `marker` in `options`, got `' + marker + '`')
   }
-
-  known = options.known
-  reset = options.reset
-  enable = options.enable || []
-  disable = options.disable || []
-  sources = options.source
 
   if (!sources) {
     sources = [name]
@@ -39156,7 +41544,7 @@ function messageControl(options) {
       var pos
       var tail
 
-      if (!mark || mark.name !== options.name) {
+      if (!mark || mark.name !== name) {
         return
       }
 
@@ -39390,8 +41778,8 @@ function detectGaps(tree, file) {
   }
 }
 
-function trim(str) {
-  return str.replace(/^\s*|\s*$/g, '')
+function trim(value) {
+  return value.replace(/^\s*|\s*$/g, '')
 }
 
 
@@ -39509,7 +41897,7 @@ function merge(definitions) {
 
 const Preprocessor = __webpack_require__(799);
 const unicode = __webpack_require__(56);
-const neTree = __webpack_require__(506);
+const neTree = __webpack_require__(318);
 const ERR = __webpack_require__(665);
 
 //Aliases
