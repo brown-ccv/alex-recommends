@@ -57,7 +57,7 @@ jobs:
       with:
         node-version: 12.x
     - name: Comment on new PR
-      uses: brown-ccv/alex-recommends@v1.2.0
+      uses: brown-ccv/alex-recommends@v1.2.1
       with:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         message_id: 'alex'
