@@ -1,6 +1,6 @@
 {
   "name": "alex-recommends",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Comment on a PR with alex recommendations",
   "main": "main.js",
   "scripts": {
