@@ -94,10 +94,13 @@ function checkAlex(filesList, noBinary, profanitySureness) {
 	const filteredFilesList = filesList.filter((value) => fs.existsSync(value));
 	const options = {noBinary: noBinary, profanitySureness: profanitySureness}
 
+  let count = 0
 	let checkRes = filteredFilesList.map(file => {
 		const resp = checkFile(file, options)
+    count += resp.messages.length;
 		return {filePath: file, result: resp}
 	})
+  console.warn(`Found ${count} recommendations.`)
 
 	return formatComment(checkRes)
 }

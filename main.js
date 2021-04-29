@@ -61,8 +61,10 @@ async function run() {
 
     const previous = await findPreviousComment(octokit, repo, number, messageId);
     if (previous) {
+      console.warn("Found previous comment, updating");
       await updateComment(octokit, repo, previous.id, messageId, checkComment)
     } else {
+      console.warn("Creating new comment");
       await createComment(octokit, repo, number, messageId, checkComment);
     }
   } catch ({ message }) {

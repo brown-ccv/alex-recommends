@@ -23143,10 +23143,13 @@ function checkAlex(filesList, noBinary, profanitySureness) {
 	const filteredFilesList = filesList.filter((value) => fs.existsSync(value));
 	const options = {noBinary: noBinary, profanitySureness: profanitySureness}
 
+  let count = 0
 	let checkRes = filteredFilesList.map(file => {
 		const resp = checkFile(file, options)
+    count += resp.messages.length;
 		return {filePath: file, result: resp}
 	})
+  console.warn(`Found ${count} recommendations.`)
 
 	return formatComment(checkRes)
 }
@@ -26863,8 +26866,10 @@ async function run() {
 
     const previous = await findPreviousComment(octokit, repo, number, messageId);
     if (previous) {
+      console.warn("Found previous comment, updating");
       await updateComment(octokit, repo, previous.id, messageId, checkComment)
     } else {
+      console.warn("Creating new comment");
       await createComment(octokit, repo, number, messageId, checkComment);
     }
   } catch ({ message }) {
