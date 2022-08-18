@@ -10,7 +10,7 @@
   "author": "mcmcgrath13",
   "license": "MIT",
   "dependencies": {
-    "@actions/core": "^1.2",
+    "@actions/core": "^1.9",
     "@actions/github": "^3.0.0",
     "@actions/glob": "^0.1.0",
     "alex": "^9.1.0",
