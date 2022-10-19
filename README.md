@@ -41,7 +41,7 @@ None
 
 This workflow runs when a PR is made.  It then comments with the results of `alex` or updates a past comment, if available (based on `message_id`).
 
-```
+```yml
 name: Alex Recommends
 
 on: pull_request_target
